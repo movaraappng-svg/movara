@@ -121,26 +121,183 @@ function ServiceCard({ icon, number, title, text, onClick }) {
   </motion.button>;
 }
 
+const rideOptions = [
+  { key: 'standard', name: 'Standard car', description: 'Everyday rides', price: 3500, capacity: 4 },
+  { key: 'comfort', name: 'Comfort car', description: 'A little more room', price: 5000, capacity: 4 },
+  { key: 'keke', name: 'Keke', description: 'Quick city trips', price: 1500, capacity: 3 },
+];
+
+function routeDistanceKm(first, second) {
+  if (!first || !second) return null;
+  const radians = (value) => (value * Math.PI) / 180;
+  const [lat1, lon1] = first.map(radians);
+  const [lat2, lon2] = second.map(radians);
+  const a = Math.sin((lat2 - lat1) / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toLocalDateTime(date) {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 16);
+}
+
 function RidePage({ user, showToast, navigate }) {
-  const [pickup, setPickup] = useState(''); const [destination, setDestination] = useState(''); const [pickupPoint, setPickupPoint] = useState(null); const [destinationPoint, setDestinationPoint] = useState(null); const [busy, setBusy] = useState(false); const [vehicle, setVehicle] = useState('Standard car');
-  const fare = vehicle === 'Keke' ? 1500 : vehicle === 'Comfort car' ? 5000 : 3500;
+  const [pickup, setPickup] = useState('');
+  const [destination, setDestination] = useState('');
+  const [pickupPoint, setPickupPoint] = useState(null);
+  const [destinationPoint, setDestinationPoint] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [vehicle, setVehicle] = useState('standard');
+  const [passengers, setPassengers] = useState(1);
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [instructions, setInstructions] = useState('');
+  const [rides, setRides] = useState([]);
+  const [loadingRides, setLoadingRides] = useState(false);
+  const [cancelling, setCancelling] = useState('');
+
+  const selectedRide = rideOptions.find((option) => option.key === vehicle) ?? rideOptions[0];
+  const distanceKm = routeDistanceKm(pickupPoint, destinationPoint);
+  const estimatedFare = distanceKm === null
+    ? selectedRide.price
+    : Math.max(selectedRide.price, Math.round((selectedRide.price + Math.max(0, distanceKm - 2) * (vehicle === 'keke' ? 220 : 480)) / 100) * 100);
+  const minSchedule = toLocalDateTime(new Date(Date.now() + 30 * 60 * 1000));
+
+  async function loadRides() {
+    if (!isConfigured || !user) { setRides([]); return; }
+    setLoadingRides(true);
+    const { data, error } = await supabase.from('rides')
+      .select('id,pickup_label,destination_label,status,estimated_fare_ngn_kobo,service_level,passenger_count,scheduled_for,created_at,cancelled_at')
+      .eq('customer_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (error) showToast('Your ride list could not be refreshed. Please try again.');
+    else setRides(data ?? []);
+    setLoadingRides(false);
+  }
+
+  useEffect(() => {
+    if (!user || !isConfigured) return undefined;
+    loadRides();
+    const channel = supabase.channel(`rider-rides-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rides', filter: `customer_id=eq.${user.id}` }, loadRides)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id]);
+
   async function requestRide(event) {
     event.preventDefault();
     if (!pickup.trim() || !destination.trim()) return showToast('Add both your pickup and destination to continue.');
+    if (pickup.trim().toLowerCase() === destination.trim().toLowerCase()) return showToast('Pickup and destination must be different.');
     if (!isConfigured) return showToast('Ride booking is not connected yet. Add the Supabase settings to continue.');
-    if (!user) { showToast('Sign in to save and track your ride.'); navigate('auth'); return; }
+    if (!user) { showToast('Sign in to request and follow your ride.'); navigate('auth'); return; }
+    if (passengers > selectedRide.capacity) return showToast(`${selectedRide.name} is available for up to ${selectedRide.capacity} passengers.`);
+    const scheduledDate = scheduledAt ? new Date(scheduledAt) : null;
+    if (scheduledDate && scheduledDate <= new Date(Date.now() + 30 * 60 * 1000)) return showToast('Choose a pickup time at least 30 minutes from now.');
     setBusy(true);
-    const { error } = await supabase.from('rides').insert({ customer_id: user.id, pickup_label: pickup.trim(), destination_label: destination.trim(), passenger_count: 1, estimated_fare_ngn_kobo: fare * 100, status: 'requested' });
-    setBusy(false);
-    showToast(error ? error.message : 'Ride request saved. Your trip is now in your account.');
+    try {
+      const booking = {
+        customer_id: user.id,
+        pickup_label: pickup.trim(),
+        destination_label: destination.trim(),
+        pickup_latitude: pickupPoint?.[0] ?? null,
+        pickup_longitude: pickupPoint?.[1] ?? null,
+        destination_latitude: destinationPoint?.[0] ?? null,
+        destination_longitude: destinationPoint?.[1] ?? null,
+        service_level: vehicle,
+        passenger_count: passengers,
+        estimated_fare_ngn_kobo: estimatedFare * 100,
+        scheduled_for: scheduledDate?.toISOString() ?? null,
+        special_instructions: instructions.trim() || null,
+        payment_method: 'cash',
+        status: 'requested',
+      };
+      const { error } = await supabase.from('rides').insert(booking);
+      if (error) throw error;
+      showToast('Your ride request is saved. We’ll update this page when its status changes.');
+      setPickup(''); setDestination(''); setPickupPoint(null); setDestinationPoint(null);
+      setInstructions(''); setScheduledAt(''); setPassengers(1);
+      await loadRides();
+    } catch (error) {
+      console.error('Ride request failed', error);
+      showToast(error.message?.includes('column') || error.code === '42703'
+        ? 'Ride booking needs the latest database update. Please contact support.'
+        : 'Your ride could not be saved. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
   }
-  async function useMyLocation() {
+
+  function useMyLocation() {
     if (!navigator.geolocation) return showToast('Location access is not available in this browser.');
-    showToast('Finding your location…');
-    navigator.geolocation.getCurrentPosition(({ coords }) => { const point = [coords.latitude, coords.longitude]; setPickupPoint(point); setPickup(`Current location (${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)})`); showToast('Your current location is set as pickup.'); }, (error) => showToast(error.code === 1 ? 'Allow location access in your browser to use your current position.' : 'We could not get your location. You can enter a pickup manually.'), { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 });
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(({ coords }) => {
+      const point = [coords.latitude, coords.longitude];
+      setPickupPoint(point);
+      setPickup(`My location (${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)})`);
+      setLocating(false);
+      showToast('Your current location is set as pickup.');
+    }, (error) => {
+      setLocating(false);
+      showToast(error.code === 1
+        ? 'Allow location access in your browser to use your current position.'
+        : 'We could not get your location. You can enter a pickup manually.');
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 });
   }
+
+  function setMapPoint(latlng) {
+    const point = [latlng.lat, latlng.lng];
+    const label = `Map pin (${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)})`;
+    if (!pickupPoint || (pickupPoint && destinationPoint)) {
+      setPickupPoint(point); setPickup(label); setDestinationPoint(null); setDestination('');
+    } else {
+      setDestinationPoint(point); setDestination(label);
+    }
+  }
+
+  async function cancelRide(rideId) {
+    setCancelling(rideId);
+    const { error } = await supabase.rpc('cancel_ride', { p_ride_id: rideId, p_reason: 'Cancelled by rider' });
+    setCancelling('');
+    if (error) showToast(error.message || 'This ride could not be cancelled.');
+    else { showToast('Ride cancelled.'); await loadRides(); }
+  }
+
+  const formatFare = (amount) => amount == null ? 'Fare to be confirmed' : `₦${Math.round(amount / 100).toLocaleString()}`;
+  const formatStatus = (status) => ({ requested: 'Request sent', matching: 'Finding a driver', accepted: 'Driver confirmed', in_progress: 'On your way', completed: 'Completed', cancelled: 'Cancelled' }[status] ?? status);
   const chosenPoints = [pickupPoint, destinationPoint].filter(Boolean);
-  return <motion.div className="page subpage" {...pageMotion}><div className="subpage-intro"><span className="eyebrow">A BETTER WAY THERE</span><h1>Where are you headed?</h1><p>Set your route and choose the ride that feels right.</p></div><div className="ride-layout"><form className="panel ride-form" onSubmit={requestRide}><div className="form-heading"><span className="form-step">01</span><div><h2>Your route</h2><p>Where should we pick you up?</p></div></div><label className="field"><Icon icon={Location01Icon} /><input value={pickup} onChange={(e) => setPickup(e.target.value)} placeholder="Pickup location" required /></label><button className="text-action location-action" type="button" onClick={useMyLocation}>◎ Use my current location</button><label className="field"><Icon icon={Location01Icon} /><input value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="Where to?" required /></label><p className="map-help">Tap the map to add a pickup or destination point.</p><div className="form-heading second"><span className="form-step">02</span><div><h2>Choose a ride</h2><p>Indicative starting fares shown in naira.</p></div></div><div className="vehicle-list">{[['Standard car','Everyday rides',3500],['Comfort car','A little more room',5000],['Keke','Quick and easy trips',1500]].map(([name,desc,price]) => <button type="button" key={name} onClick={() => setVehicle(name)} className={vehicle === name ? 'vehicle selected' : 'vehicle'}><span className="vehicle-icon"><Icon icon={Car01Icon} /></span><span className="vehicle-info"><b>{name}</b><small>{desc}</small></span><b className="vehicle-price">₦{Number(price).toLocaleString()}</b><span className="radio" /></button>)}</div><button className="button primary full" disabled={busy}>{busy ? 'Saving request…' : 'Request this ride'} <Icon icon={ArrowRight01Icon} /></button><div className="fine-print"><Icon icon={Shield01Icon} size={16} /> Your trip request is saved securely to your account.</div></form><aside className="ride-aside"><div className="map-live"><MapContainer center={pickupPoint ?? defaultCenter} zoom={pickupPoint ? 14 : 6} scrollWheelZoom={false}><TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/><FocusPoint point={pickupPoint}/><MapClick onPick={(latlng) => { const point = [latlng.lat, latlng.lng]; if (!pickupPoint || destinationPoint) { setPickupPoint(point); setPickup(`Map pin (${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)})`); setDestinationPoint(null); } else { setDestinationPoint(point); setDestination(`Map pin (${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)})`); } }}/>{pickupPoint && <Marker position={pickupPoint} icon={pinIcon}/ >}{destinationPoint && <Marker position={destinationPoint} icon={pinIcon}/ >}{chosenPoints.length === 2 && <Polyline positions={chosenPoints} color="#ba9655"/>}</MapContainer><span className="map-caption">TAP TO SET PICKUP, THEN DESTINATION</span></div><div className="fare-card"><span className="fare-icon"><Icon icon={Wallet01Icon} /></span><div><small>Indicative starting fare</small><b>₦{fare.toLocaleString()}</b></div><p>Sample starting fare only. It is not a live quote.</p></div><p className="service-note">Driver matching and in-app payments require a live operating partner.</p></aside></div></motion.div>;
+
+  return <motion.div className="page subpage" {...pageMotion}>
+    <div className="subpage-intro"><span className="eyebrow">A BETTER WAY THERE</span><h1>Where are you headed?</h1><p>Set your route and choose the ride that feels right.</p></div>
+    <div className="ride-layout">
+      <form className="panel ride-form" onSubmit={requestRide}>
+        <div className="form-heading"><span className="form-step">01</span><div><h2>Your route</h2><p>Where should we pick you up?</p></div></div>
+        <label className="field"><Icon icon={Location01Icon} /><input value={pickup} onChange={(event) => { setPickup(event.target.value); setPickupPoint(null); }} placeholder="Pickup location" autoComplete="street-address" required /></label>
+        <button className="text-action location-action" type="button" onClick={useMyLocation} disabled={locating}>{locating ? 'Finding your location…' : '◎ Use my current location'}</button>
+        <label className="field"><Icon icon={Location01Icon} /><input value={destination} onChange={(event) => { setDestination(event.target.value); setDestinationPoint(null); }} placeholder="Where to?" autoComplete="off" required /></label>
+        <p className="map-help">Choose a point on the map for a distance estimate. You can also type either address.</p>
+        <div className="form-heading second"><span className="form-step">02</span><div><h2>Choose a ride</h2><p>Final fare is confirmed when a driver accepts.</p></div></div>
+        <div className="vehicle-list">{rideOptions.map((option) => <button type="button" key={option.key} onClick={() => { setVehicle(option.key); if (passengers > option.capacity) setPassengers(option.capacity); }} className={vehicle === option.key ? 'vehicle selected' : 'vehicle'} aria-pressed={vehicle === option.key}><span className="vehicle-icon"><Icon icon={Car01Icon} /></span><span className="vehicle-info"><b>{option.name}</b><small>{option.description} · up to {option.capacity}</small></span><b className="vehicle-price">₦{option.price.toLocaleString()}+</b><span className="radio" /></button>)}</div>
+        <div className="ride-extra-grid">
+          <label className="input-label">Passengers<select value={passengers} onChange={(event) => setPassengers(Number(event.target.value))}>{Array.from({ length: selectedRide.capacity }, (_, index) => <option value={index + 1} key={index + 1}>{index + 1} {index === 0 ? 'passenger' : 'passengers'}</option>)}</select></label>
+          <label className="input-label">Pickup time<input type="datetime-local" min={minSchedule} value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /><small>Leave empty for the soonest pickup.</small></label>
+        </div>
+        <label className="input-label">Note for your driver <textarea maxLength={300} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Gate, landmark, or other helpful detail" rows={3} /></label>
+        <div className="ride-payment-line"><span><Icon icon={Wallet01Icon} size={18} /> Payment</span><b>Cash to driver</b><small>In-app payments are not available yet.</small></div>
+        <button className="button primary full" disabled={busy}>{busy ? 'Sending request…' : 'Request this ride'} <Icon icon={ArrowRight01Icon} /></button>
+        <div className="fine-print"><Icon icon={Shield01Icon} size={16} /> Your request and trip updates are saved to your account.</div>
+      </form>
+      <aside className="ride-aside">
+        <div className="map-live"><MapContainer center={pickupPoint ?? defaultCenter} zoom={pickupPoint ? 14 : 6} scrollWheelZoom={false}><TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/><FocusPoint point={pickupPoint}/><MapClick onPick={setMapPoint}/>{pickupPoint && <Marker position={pickupPoint} icon={pinIcon}/ >}{destinationPoint && <Marker position={destinationPoint} icon={pinIcon}/ >}{chosenPoints.length === 2 && <Polyline positions={chosenPoints} color="#ba9655"/>}</MapContainer><span className="map-caption">{pickupPoint ? destinationPoint ? 'ROUTE PREVIEW' : 'TAP TO SET DESTINATION' : 'TAP TO SET PICKUP, THEN DESTINATION'}</span></div>
+        <div className="fare-card"><span className="fare-icon"><Icon icon={Wallet01Icon} /></span><div><small>{distanceKm === null ? 'Starting fare estimate' : `About ${distanceKm.toFixed(1)} km straight-line`}</small><b>₦{estimatedFare.toLocaleString()}</b></div><p>Indicative estimate only. Actual road distance, traffic, and driver confirmation can change the fare.</p></div>
+        <div className="service-note"><b>Trip updates</b><span>Requests are saved securely. Driver availability and arrival updates depend on your local driver network.</span></div>
+      </aside>
+    </div>
+    {user && <section className="ride-history"><div className="section-head"><div><span className="eyebrow">YOUR JOURNEYS</span><h2>Recent rides</h2></div><button className="text-action" type="button" onClick={loadRides}>Refresh</button></div>
+      {loadingRides && rides.length === 0 ? <p className="history-message">Loading your rides…</p> : rides.length === 0 ? <p className="history-message">Your ride requests will appear here.</p> : <div className="ride-history-list">{rides.map((ride) => <article className="ride-history-card" key={ride.id}><div className="ride-history-top"><span className={`ride-status status-${ride.status}`}>{formatStatus(ride.status)}</span><b>{formatFare(ride.estimated_fare_ngn_kobo)}</b></div><p><span>{ride.pickup_label}</span><i aria-hidden="true" /><span>{ride.destination_label}</span></p><small>{ride.service_level ?? 'Ride'} · {ride.passenger_count} {ride.passenger_count === 1 ? 'passenger' : 'passengers'} · {new Date(ride.scheduled_for ?? ride.created_at).toLocaleString()}</small>{['requested','matching'].includes(ride.status) && <button className="ride-cancel" type="button" onClick={() => cancelRide(ride.id)} disabled={cancelling === ride.id}>{cancelling === ride.id ? 'Cancelling…' : 'Cancel request'}</button>}</article>)}</div>}
+    </section>}
+  </motion.div>;
 }
 
 function HomesPage({ showToast }) {
