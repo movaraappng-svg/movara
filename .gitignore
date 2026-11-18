@@ -1,0 +1,16 @@
+node_modules/
+**/node_modules/
+.env
+.env.*
+!.env.example
+**/dist/
+**/.expo/
+**/.expo-export-check*/
+.DS_Store
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+supabase/.temp/

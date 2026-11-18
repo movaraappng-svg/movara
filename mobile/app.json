@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "MoVara",
+    "slug": "movara",
+    "scheme": "movara",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow MoVara to use your location to set your ride pickup."
+        }
+      ],
+      "expo-font",
+      "expo-status-bar",
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

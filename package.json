@@ -1,0 +1,12 @@
+{
+  "name": "movara",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix react-app run dev",
+    "build": "npm --prefix react-app run build",
+    "preview": "npm --prefix react-app run preview",
+    "mobile": "npm --prefix mobile start",
+    "mobile:android": "npm --prefix mobile run android",
+    "mobile:ios": "npm --prefix mobile run ios"
+  }
+}
