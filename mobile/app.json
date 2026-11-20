@@ -15,6 +15,7 @@
         }
       ],
       "expo-font",
+      ["expo-notifications", {"defaultChannel":"updates"}],
       "expo-status-bar",
       "expo-web-browser"
     ],

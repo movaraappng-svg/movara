@@ -1,4 +1,6 @@
 -- Extend rider requests with trip details needed for operations and tracking.
+grant movara_workflow_owner to postgres with set true, inherit false;
+grant create on schema public to movara_workflow_owner;
 alter table public.rides
   add column pickup_latitude double precision,
   add column pickup_longitude double precision,
@@ -82,6 +84,8 @@ $$;
 alter function public.cancel_ride(uuid, text) owner to movara_workflow_owner;
 revoke all on function public.cancel_ride(uuid, text) from public, anon;
 grant execute on function public.cancel_ride(uuid, text) to authenticated;
+revoke movara_workflow_owner from postgres;
+revoke create on schema public from movara_workflow_owner;
 
 do $$
 begin

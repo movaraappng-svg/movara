@@ -31,3 +31,9 @@ file_size_limit = "10MiB"
 
 [studio]
 enabled = true
+
+[functions.paystack-webhook]
+verify_jwt = false
+
+[functions.shared-ride]
+verify_jwt = false
