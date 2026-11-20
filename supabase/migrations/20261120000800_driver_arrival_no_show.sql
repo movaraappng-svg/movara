@@ -5,6 +5,10 @@ alter table public.rides
 
 grant select on public.ride_requests to authenticated;
 
+grant movara_workflow_owner to postgres with set true, inherit false;
+grant create on schema public, private to movara_workflow_owner;
+grant update on public.rides to movara_workflow_owner;
+grant trigger on public.rides to movara_workflow_owner;
 set role movara_workflow_owner;
 
 create or replace function public.driver_mark_arrived(p_ride_id uuid)
@@ -108,4 +112,7 @@ for each row execute function private.notify_driver_arrival();
 
 reset role;
 revoke create on schema public from movara_workflow_owner;
+revoke create on schema private from movara_workflow_owner;
+revoke trigger on public.rides from movara_workflow_owner;
+revoke movara_workflow_owner from postgres;
 

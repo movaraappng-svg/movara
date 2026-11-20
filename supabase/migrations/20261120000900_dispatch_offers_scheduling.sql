@@ -1,4 +1,6 @@
 -- Durable dispatch offer records and scheduled ride activation. Local only.
+grant movara_workflow_owner to postgres with set true, inherit false;
+grant create on schema public to movara_workflow_owner;
 alter table public.ride_requests
   add column if not exists expires_at timestamptz,
   add column if not exists offer_round integer not null default 1 check (offer_round > 0);
@@ -182,3 +184,4 @@ grant execute on function public.admin_reassign_ride(uuid,text) to authenticated
 
 reset role;
 revoke create on schema public from movara_workflow_owner;
+revoke movara_workflow_owner from postgres;

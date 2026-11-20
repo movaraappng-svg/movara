@@ -83,7 +83,8 @@ alter function public.wallet_finalize_transfer(text,text,text) owner to movara_w
 revoke all on function public.wallet_finalize_transfer(text,text,text) from public,anon,authenticated;
 grant execute on function public.wallet_finalize_transfer(text,text,text) to service_role;
 
-create or replace function public.admin_update_wallet_withdrawal(p_id uuid,p_status text,p_provider_reference text default null,p_note text default null)
+drop function public.admin_update_wallet_withdrawal(uuid,text,text,text);
+create function public.admin_update_wallet_withdrawal(p_id uuid,p_status text,p_provider_reference text default null,p_note text default null)
 returns void language plpgsql security definer set search_path = '' as $$
 declare v_actor uuid:=auth.uid(); v_row public.wallet_withdrawals%rowtype;
 begin
@@ -111,5 +112,4 @@ end;
 $$;
 alter function public.admin_update_wallet_withdrawal(uuid,text,text,text) owner to movara_workflow_owner;
 revoke create on schema public from movara_workflow_owner;
-revoke movara_workflow_owner from postgres;
 

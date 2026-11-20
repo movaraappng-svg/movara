@@ -52,6 +52,8 @@ create policy push_devices_read_own on public.push_devices
 grant select on public.push_devices to authenticated;
 
 grant usage on schema private to movara_workflow_owner;
+grant usage on schema auth to movara_workflow_owner;
+grant execute on function auth.uid() to movara_workflow_owner;
 grant execute on function private.has_role(public.app_role) to movara_workflow_owner;
 grant select on public.profiles,public.user_roles,public.notification_preferences,
   public.rides,public.property_viewings,public.driver_verifications,
@@ -65,6 +67,7 @@ grant insert,update on public.notifications to movara_workflow_owner;
 
 grant movara_workflow_owner to postgres with set true, inherit false;
 grant create on schema public to movara_workflow_owner;
+grant create on schema private to movara_workflow_owner;
 set role movara_workflow_owner;
 
 create function public.notification_set_preference(p_kind text,p_channel text,p_enabled boolean)
@@ -105,9 +108,11 @@ end;
 $$;
 
 create function public.notification_remove_device(p_device_id uuid)
-returns void language sql security definer set search_path = '' as $$
+returns void language plpgsql security definer set search_path = '' as $$
+begin
   update public.push_devices set enabled=false,updated_at=pg_catalog.now()
   where id=p_device_id and user_id=auth.uid();
+end;
 $$;
 
 create function public.notification_mark_all_read()
@@ -249,6 +254,7 @@ $$;
 reset role;
 revoke movara_workflow_owner from postgres;
 revoke create on schema public from movara_workflow_owner;
+revoke create on schema private from movara_workflow_owner;
 
 alter function public.notification_set_preference(text,text,boolean) owner to movara_workflow_owner;
 alter function public.notification_register_device(text,text,text) owner to movara_workflow_owner;

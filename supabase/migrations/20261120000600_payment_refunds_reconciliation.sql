@@ -84,7 +84,6 @@ begin
 end;
 $$;
 reset role;
-revoke movara_workflow_owner from postgres;
 revoke create on schema public from movara_workflow_owner;
 alter function public.admin_request_paystack_refund(uuid,bigint,text,text) owner to movara_workflow_owner;
 revoke all on function public.admin_request_paystack_refund(uuid,bigint,text,text) from public,anon;
