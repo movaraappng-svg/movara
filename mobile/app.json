@@ -5,7 +5,8 @@
     "scheme": "movara",
     "version": "1.0.0",
     "android": {
-      "package": "com.movaraappng.movara"
+      "package": "com.movaraappng.movara",
+      "googleServicesFile": "./google-services.json"
     },
     "ios": {
       "bundleIdentifier": "com.movaraappng.movara"
