@@ -131,7 +131,7 @@ async function sendPush(notification:any,user:any,admin:any) {
     let response:Response|undefined;let data:any={};
     if(provider==='expo'){
       const accessToken=Deno.env.get('EXPO_ACCESS_TOKEN');
-      response=await fetch('https://exp.host/--/api/v2/push/send',{method:'POST',headers:{'Content-Type':'application/json',...(accessToken?{Authorization:`Bearer ${accessToken}`}:{})},body:JSON.stringify({to:device.token,sound:'default',title,body,data:{notificationId:notification.id}})});
+      response=await fetch('https://exp.host/--/api/v2/push/send',{method:'POST',headers:{'Content-Type':'application/json',...(accessToken?{Authorization:`Bearer ${accessToken}`}:{})},body:JSON.stringify({to:device.token,sound:'default',channelId:'updates',title,body,data:{notificationId:notification.id}})});
     }else if(provider==='fcm'&&fcmToken&&serviceAccount?.project_id){
       response=await fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/messages:send`,{method:'POST',headers:{Authorization:`Bearer ${fcmToken}`,'Content-Type':'application/json'},body:JSON.stringify({message:{token:device.token,notification:{title,body},data:{notificationId:notification.id}}})});
     }
