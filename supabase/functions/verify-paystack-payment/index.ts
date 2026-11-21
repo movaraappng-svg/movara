@@ -17,7 +17,7 @@ Deno.serve(async (request) => {
   let body: { reference?: string }; try { body = await request.json(); } catch { return json({ error: 'Invalid request.' }, 400, origin); }
   if (!body.reference || body.reference.length > 120) return json({ error: 'Payment reference is missing.' }, 400, origin);
   const admin = createClient(url, service, { auth: { persistSession: false } });
-  const { data: payment } = await admin.from('payments').select('id,ride_id,payer_id,amount_kobo,currency,status,payment_type').eq('provider', 'paystack').eq('provider_reference', body.reference).eq('payer_id', user.id).single();
+  const { data: payment } = await admin.from('payments').select('id,ride_id,cargo_order_id,payer_id,amount_kobo,currency,status,payment_type').eq('provider', 'paystack').eq('provider_reference', body.reference).eq('payer_id', user.id).single();
   if (!payment) return json({ error: 'This payment could not be found for your account.' }, 404, origin);
   const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(body.reference)}`, { headers: { Authorization: `Bearer ${key}` } });
   const result = await response.json(); const transaction = result.data;
@@ -38,5 +38,5 @@ Deno.serve(async (request) => {
     const { error } = await admin.from('payments').update({ status: 'succeeded', updated_at: new Date().toISOString() }).eq('id', payment.id).eq('status', 'pending');
     if (error) return json({ error: 'Payment was received but could not be recorded. Contact support with the reference.' }, 500, origin);
   }
-  return json({ paid: true }, 200, origin);
+  return json({ paid: true, cargo_order: payment.payment_type === 'cargo' }, 200, origin);
 });

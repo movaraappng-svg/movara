@@ -208,8 +208,9 @@ export function App() {
       clearInterval(timer);
       const url = new URL(window.location.href); url.searchParams.delete('reference'); url.searchParams.delete('trxref'); window.history.replaceState({}, '', url);
       const walletTopup=data?.wallet_topup||reference.startsWith('movara_wallet_');
-      setPage(walletTopup ? 'wallet' : 'rides');
-      setToast(data?.paid ? (walletTopup ? 'Wallet top up confirmed.' : 'Payment confirmed. Your driver can start the trip.') : data?.error || 'Payment was not completed.');
+      const cargoOrder=data?.cargo_order||reference.startsWith('movara_cargo_');
+      setPage(walletTopup ? 'wallet' : cargoOrder ? 'logistics' : 'rides');
+      setToast(data?.paid ? (walletTopup ? 'Wallet top up confirmed.' : cargoOrder ? 'Delivery payment confirmed. MoVara can now assign your courier.' : 'Payment confirmed. Your driver can start the trip.') : data?.error || 'Payment was not completed.');
     }, 1200);
     return () => clearInterval(timer);
   }, []);
@@ -231,6 +232,7 @@ export function App() {
       </button>
       <nav className={mobileMenu ? 'nav open' : 'nav'}>
         <button className={page === 'rides' ? 'nav-link active' : 'nav-link'} onClick={() => navigate('rides')}>Rides</button>
+        <button className={page === 'logistics' ? 'nav-link active' : 'nav-link'} onClick={() => navigate('logistics')}>Cargo</button>
         <button className={page === 'homes' ? 'nav-link active' : 'nav-link'} onClick={() => navigate('homes')}>Find a home</button>
         <button className="nav-link" onClick={() => navigate('drive')}>Drive</button>
         <button className="nav-link" onClick={() => navigate('list')}>List property</button>
@@ -247,7 +249,7 @@ export function App() {
       <AnimatePresence mode="wait">
         {page === 'home' && <HomePage key="home" navigate={navigate} />}
         {page === 'rides' && <RidePage key="rides" user={user} showToast={showToast} navigate={navigate} />}
-        {page === 'logistics' && <LogisticsPage navigate={navigate} />}
+        {page === 'logistics' && <LogisticsPage user={user} showToast={showToast} navigate={navigate} />}
         {page === 'homes' && <HomesPage key="homes" user={user} showToast={showToast} navigate={navigate} />}
         {page === 'saved-homes' && <SavedHomesPage key="saved-homes" user={user} showToast={showToast} navigate={navigate} />}
         {page === 'home-inbox' && <PropertyInboxPage key="home-inbox" user={user} showToast={showToast} navigate={navigate} />}
@@ -295,22 +297,169 @@ function HomePage({ navigate }) {
       <div className="service-grid">
         <ServiceCard icon={Car01Icon} number="01" title="Get there" text="A ride that fits your day, with a journey you can follow." onClick={() => navigate('rides')} />
         <ServiceCard icon={Home01Icon} number="02" title="Find your place" text="Explore homes and make your next chapter feel closer." onClick={() => navigate('homes')} />
-        <ServiceCard icon={Building03Icon} number="03" title="Send or move goods" text="Delivery and cargo services are being prepared. See what is planned." onClick={() => navigate('logistics')} />
-        <ServiceCard icon={Building03Icon} number="03" title="Grow with us" text="Build your driving or property journey on MoVara." onClick={() => navigate('drive')} />
+        <ServiceCard icon={Building03Icon} number="03" title="Send or move goods" text="Book a delivery, receive a confirmed quote, and follow it from pickup to handoff." onClick={() => navigate('logistics')} />
+        <ServiceCard icon={Building03Icon} number="04" title="Grow with us" text="Build your driving or property journey on MoVara." onClick={() => navigate('drive')} />
       </div>
     </section>
     <section className="quiet-banner"><span className="quiet-mark">M</span><div><span className="eyebrow">BUILT AROUND PEOPLE</span><h2>Good service should feel simple.</h2><p>Clear choices, thoughtful details, and support when you need it.</p></div><button className="text-action" onClick={() => navigate('auth')}>Get started <Icon icon={ArrowRight01Icon} /></button></section>
   </motion.div>;
 }
 
-function LogisticsPage({ navigate }) {
-  return <motion.div className="page subpage" {...pageMotion}>
-    <span className="eyebrow">COMING SOON</span><h1>Moving things, with care.</h1>
-    <p>We’re preparing delivery and cargo services for markets across Nigeria. These options are not bookable yet.</p>
-    <div className="service-grid">
-      {[['Local delivery','Documents and small parcels, with pickup confirmation and delivery proof.'],['Home and office moves','Plan a move with vehicle size, item list, and a scheduled crew.'],['Business cargo','Request a quote for recurring or larger commercial shipments.']].map(([title,copy])=><article className="service-card" key={title}><span className="eyebrow">PLANNED SERVICE</span><h2>{title}</h2><p>{copy}</p><span className="ride-status">Not available for booking</span></article>)}
-    </div>
-    <button className="button primary" onClick={() => navigate('rides')}>Book a ride instead</button>
+const cargoServiceNames = { documents: 'Documents', parcel: 'Parcel delivery', food: 'Food and perishables', home_move: 'Home or office move', business_cargo: 'Business cargo' };
+const cargoStatusNames = { requested: 'Request received', quoted: 'Quote ready', accepted: 'Awaiting payment', assigned: 'Courier assigned', picked_up: 'Picked up', in_transit: 'On the way', delivered: 'Delivered', cancelled: 'Cancelled', issue: 'Needs attention' };
+const blankCargo = { recipientName: '', recipientPhone: '', serviceType: 'parcel', packageSize: 'small', packageCount: '1', weightKg: '', declaredValue: '', fragile: false, pickup: '', pickupCity: '', pickupRegion: '', destination: '', destinationCity: '', destinationRegion: '', pickupAt: '', contents: '', note: '' };
+
+function LogisticsPage({ user, showToast, navigate }) {
+  const [form, setForm] = useState(blankCargo);
+  const [orders, setOrders] = useState([]);
+  const [events, setEvents] = useState({});
+  const [admin, setAdmin] = useState(false);
+  const [vehicles, setVehicles] = useState([]);
+  const [pendingVehicles, setPendingVehicles] = useState([]);
+  const [quotes, setQuotes] = useState({});
+  const [assignments, setAssignments] = useState({});
+  const [loading, setLoading] = useState(Boolean(user));
+  const [busy, setBusy] = useState('');
+
+  async function load() {
+    if (!user || !isConfigured) { setLoading(false); return; }
+    setLoading(true);
+    const { data: role } = await supabase.from('user_roles').select('role').eq('user_id', user.id).eq('role', 'administrator').maybeSingle();
+    const isAdmin = Boolean(role); setAdmin(isAdmin);
+    let query = supabase.from('cargo_orders').select('id,tracking_code,sender_id,recipient_name,recipient_phone,service_type,package_size,package_count,weight_kg,declared_value_ngn_kobo,fragile,pickup_label,pickup_city,pickup_region,destination_label,destination_city,destination_region,pickup_at,contents_description,sender_note,quote_amount_ngn_kobo,quote_note,status,payment_status,driver_id,vehicle_id,delivery_proof,issue_note,created_at,quoted_at,accepted_at,assigned_at,picked_up_at,delivered_at,cancelled_at').order('created_at', { ascending: false }).limit(isAdmin ? 150 : 50);
+    if (!isAdmin) query = query.eq('sender_id', user.id);
+    const [{ data, error }, { data: vehicleRows, error: vehicleError }, { data: pendingRows, error: pendingError }] = await Promise.all([
+      query,
+      isAdmin ? supabase.from('vehicles').select('id,driver_id,vehicle_type,make,model,registration_number').eq('verification', 'approved') : Promise.resolve({ data: [], error: null }),
+      isAdmin ? supabase.from('vehicles').select('id,driver_id,vehicle_type,make,model,registration_number,capacity').eq('verification', 'pending').order('created_at') : Promise.resolve({ data: [], error: null }),
+    ]);
+    setLoading(false);
+    if (error) showToast('Cargo requests could not be loaded. Refresh and try again.');
+    if (vehicleError) showToast('Approved courier vehicles could not be loaded.');
+    if (pendingError) showToast('Pending courier vehicles could not be loaded.');
+    const list = data ?? []; setOrders(list); setVehicles(vehicleRows ?? []);
+    let eligiblePending = pendingRows ?? [];
+    if (eligiblePending.length) {
+      const { data: approvedDrivers } = await supabase.from('driver_verifications').select('driver_id').in('driver_id', eligiblePending.map((item) => item.driver_id)).eq('status', 'approved');
+      const ids = new Set((approvedDrivers ?? []).map((item) => item.driver_id)); eligiblePending = eligiblePending.filter((item) => ids.has(item.driver_id));
+    }
+    setPendingVehicles(eligiblePending);
+    if (list.length) {
+      const { data: eventRows, error: eventError } = await supabase.from('cargo_order_events').select('id,cargo_order_id,event_type,note,created_at').in('cargo_order_id', list.map((row) => row.id)).order('created_at', { ascending: false });
+      if (!eventError) setEvents((eventRows ?? []).reduce((all, event) => ({ ...all, [event.cargo_order_id]: [...(all[event.cargo_order_id] ?? []), event] }), {}));
+    }
+  }
+
+  useEffect(() => {
+    if (!user) { setLoading(false); return undefined; }
+    load();
+    const channel = supabase.channel(`cargo-orders-${user.id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'cargo_orders' }, load).subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [user?.id]);
+
+  function update(field, value) { setForm((current) => ({ ...current, [field]: value })); }
+  async function submit(event) {
+    event.preventDefault();
+    if (!user) { showToast('Sign in to request a delivery and follow it here.'); navigate('auth'); return; }
+    if (!isConfigured) { showToast('Cargo booking is not connected to Supabase yet.'); return; }
+    setBusy('create');
+    const { data, error } = await supabase.rpc('cargo_create_request', {
+      p_recipient_name: form.recipientName.trim(), p_recipient_phone: form.recipientPhone.trim(), p_service_type: form.serviceType,
+      p_package_size: form.packageSize, p_package_count: Number(form.packageCount), p_weight_kg: Number(form.weightKg),
+      p_declared_value_ngn_kobo: Math.round(Number(form.declaredValue || 0) * 100), p_fragile: form.fragile,
+      p_pickup_label: form.pickup.trim(), p_pickup_city: form.pickupCity.trim(), p_pickup_region: form.pickupRegion.trim(),
+      p_destination_label: form.destination.trim(), p_destination_city: form.destinationCity.trim(), p_destination_region: form.destinationRegion.trim(),
+      p_pickup_at: form.pickupAt ? new Date(form.pickupAt).toISOString() : null,
+      p_contents_description: form.contents.trim(), p_sender_note: form.note.trim() || null,
+    });
+    setBusy('');
+    if (error || !data?.id) { showToast(error?.message || 'Your delivery request could not be saved.'); return; }
+    setForm(blankCargo); showToast(`Request received. Your tracking code is ${data.tracking_code}.`); await load();
+  }
+  async function acceptQuote(order) {
+    setBusy(order.id); const { error } = await supabase.rpc('customer_accept_cargo_quote', { p_order_id: order.id }); setBusy('');
+    if (error) showToast(error.message || 'This quote could not be accepted.'); else { showToast('Quote accepted. Pay securely to release the delivery for dispatch.'); await load(); }
+  }
+  async function payOrder(order) {
+    setBusy(order.id);
+    const { data, error } = await supabase.functions.invoke('initialize-cargo-payment', { body: { cargoOrderId: order.id } });
+    setBusy('');
+    if (error || !data?.authorizationUrl) { showToast(data?.error || error?.message || 'Secure checkout could not start.'); return; }
+    window.location.assign(data.authorizationUrl);
+  }
+  async function cancelOrder(order) {
+    const { error } = await supabase.rpc('customer_cancel_cargo_order', { p_order_id: order.id, p_reason: 'Cancelled by sender.' });
+    if (error) showToast(error.message || 'This request could not be cancelled.'); else { showToast('Delivery request cancelled.'); await load(); }
+  }
+  async function sendQuote(order) {
+    const amount = Math.round(Number(quotes[order.id]?.amount) * 100); const note = quotes[order.id]?.note?.trim() || '';
+    if (!Number.isSafeInteger(amount) || amount < 100) { showToast('Enter a valid delivery quote in naira.'); return; }
+    setBusy(order.id); const { error } = await supabase.rpc('admin_quote_cargo_order', { p_order_id: order.id, p_amount_ngn_kobo: amount, p_note: note }); setBusy('');
+    if (error) showToast(error.message || 'The quote could not be sent.'); else { showToast(`Quote sent for ${order.tracking_code}.`); await load(); }
+  }
+  async function assignCourier(order) {
+    const choice = assignments[order.id] || ''; const [driverId, vehicleId] = choice.split('|');
+    if (!driverId || !vehicleId) { showToast('Choose an approved courier and vehicle.'); return; }
+    setBusy(order.id); const { error } = await supabase.rpc('admin_assign_cargo_order', { p_order_id: order.id, p_driver_id: driverId, p_vehicle_id: vehicleId, p_note: 'Assigned by MoVara dispatch.' }); setBusy('');
+    if (error) showToast(error.message || 'Courier assignment failed.'); else { showToast('Courier assigned.'); await load(); }
+  }
+  async function cancelAsAdmin(order) {
+    const { error } = await supabase.rpc('admin_cancel_cargo_order', { p_order_id: order.id, p_reason: 'Cancelled by MoVara operations. Contact support for assistance.' });
+    if (error) showToast(error.message || 'Operations could not cancel this delivery.'); else { showToast('Delivery cancelled.'); await load(); }
+  }
+  async function reviewCargoVehicle(vehicle, status) {
+    setBusy(vehicle.id);
+    const { error } = await supabase.rpc('admin_review_identity', { p_subject_type: 'vehicle', p_subject_id: vehicle.id, p_status: status, p_reason: status === 'approved' ? 'Cargo vehicle documents reviewed and approved.' : 'Vehicle details need correction. Contact MoVara support.' });
+    setBusy('');
+    if (error) showToast(error.message || 'Vehicle review could not be saved.'); else { showToast(status === 'approved' ? 'Courier vehicle approved.' : 'Vehicle returned for correction.'); await load(); }
+  }
+
+  return <motion.div className="page subpage cargo-page" {...pageMotion}>
+    <div className="subpage-intro"><span className="eyebrow">DELIVERY, WITH CARE</span><h1>Send something safely.</h1><p>Tell us what is moving and where it needs to go. We’ll confirm a clear price before you commit.</p></div>
+    {!user && <div className="cargo-signin-note"><Icon icon={Shield01Icon}/><span>Sign in to request a delivery and keep its updates in one place.</span><button className="button primary" onClick={() => navigate('auth')}>Sign in</button></div>}
+    {user && !admin && <form className="panel cargo-form" onSubmit={submit}>
+      <div className="form-heading"><span className="form-step">01</span><div><h2>What are we moving?</h2><p>Share enough detail for the right vehicle and a careful quote.</p></div></div>
+      <div className="cargo-form-grid">
+        <label className="input-label">Service type<select value={form.serviceType} onChange={(e)=>update('serviceType',e.target.value)}>{Object.entries(cargoServiceNames).map(([key,name])=><option value={key} key={key}>{name}</option>)}</select></label>
+        <label className="input-label">Package size<select value={form.packageSize} onChange={(e)=>update('packageSize',e.target.value)}><option value="small">Small · hand carry</option><option value="medium">Medium · needs a larger vehicle</option><option value="large">Large · van or truck required</option></select></label>
+        <label className="input-label">Number of items<input type="number" min="1" max="100" required value={form.packageCount} onChange={(e)=>update('packageCount',e.target.value)} /></label>
+        <label className="input-label">Approximate total weight (kg)<input type="number" min="0.1" max="10000" step="0.1" required value={form.weightKg} onChange={(e)=>update('weightKg',e.target.value)} placeholder="e.g. 4.5" /></label>
+        <label className="input-label">Declared value (₦), optional<input type="number" min="0" max="100000000" step="100" value={form.declaredValue} onChange={(e)=>update('declaredValue',e.target.value)} placeholder="For handling information" /></label>
+        <label className="input-label cargo-check"><input type="checkbox" checked={form.fragile} onChange={(e)=>update('fragile',e.target.checked)} /><span>Handle as fragile</span></label>
+      </div>
+      <label className="input-label">What is inside?<textarea required minLength="3" maxLength="1200" rows="3" value={form.contents} onChange={(e)=>update('contents',e.target.value)} placeholder="A short, accurate description helps us handle it well." /></label>
+      <div className="form-heading second"><span className="form-step">02</span><div><h2>Pickup and delivery</h2><p>Use complete addresses and local area names.</p></div></div>
+      <label className="input-label">Pickup address<input required minLength="5" maxLength="300" value={form.pickup} onChange={(e)=>update('pickup',e.target.value)} placeholder="Street address, building, or landmark" /></label>
+      <div className="cargo-form-grid cargo-location-grid"><label className="input-label">Pickup city or town<input required maxLength="100" value={form.pickupCity} onChange={(e)=>update('pickupCity',e.target.value)} /></label><label className="input-label">State or region<input required maxLength="100" value={form.pickupRegion} onChange={(e)=>update('pickupRegion',e.target.value)} /></label></div>
+      <label className="input-label">Delivery address<input required minLength="5" maxLength="300" value={form.destination} onChange={(e)=>update('destination',e.target.value)} placeholder="Street address, building, or landmark" /></label>
+      <div className="cargo-form-grid cargo-location-grid"><label className="input-label">Delivery city or town<input required maxLength="100" value={form.destinationCity} onChange={(e)=>update('destinationCity',e.target.value)} /></label><label className="input-label">State or region<input required maxLength="100" value={form.destinationRegion} onChange={(e)=>update('destinationRegion',e.target.value)} /></label></div>
+      <label className="input-label">Preferred pickup time<input type="datetime-local" min={toLocalDateTime(new Date(Date.now()+30*60*1000))} value={form.pickupAt} onChange={(e)=>update('pickupAt',e.target.value)} /><small>Leave empty for the earliest available pickup. Schedule at least 30 minutes ahead.</small></label>
+      <div className="form-heading second"><span className="form-step">03</span><div><h2>Who should receive it?</h2><p>We only share these details with the assigned courier.</p></div></div>
+      <div className="cargo-form-grid"><label className="input-label">Recipient name<input required maxLength="120" value={form.recipientName} onChange={(e)=>update('recipientName',e.target.value)} /></label><label className="input-label">Recipient phone<input required type="tel" maxLength="32" value={form.recipientPhone} onChange={(e)=>update('recipientPhone',e.target.value)} placeholder="+234…" /></label></div>
+      <label className="input-label">Note for the courier<textarea maxLength="800" rows="2" value={form.note} onChange={(e)=>update('note',e.target.value)} placeholder="Gate access, pickup contact, or other helpful detail" /></label>
+      <div className="cargo-quote-note"><Icon icon={Shield01Icon} size={18}/><span>There is no charge to request a quote. You review and accept the price before secure payment or courier assignment.</span></div>
+      <button className="button primary full" disabled={busy==='create'}>{busy==='create'?'Sending request…':'Request a delivery quote'} <Icon icon={ArrowRight01Icon}/></button>
+    </form>}
+    {user && <section className="ride-history cargo-history"><div className="section-head"><div><span className="eyebrow">{admin?'DISPATCH DESK':'YOUR SHIPMENTS'}</span><h2>{admin?'Cargo operations':'Delivery updates'}</h2></div><button className="text-action" onClick={load} disabled={loading}>Refresh</button></div>
+      {loading ? <p className="history-message">Loading shipment updates…</p> : orders.length===0 ? <p className="history-message">{admin?'No cargo requests are waiting. New orders will appear here.':'Your delivery requests and tracking updates will appear here.'}</p> : <div className="cargo-order-list">{orders.map((order)=><article className="cargo-order-card" key={order.id}>
+        <div className="cargo-order-top"><div><span className="eyebrow">{order.tracking_code}</span><h3>{cargoServiceNames[order.service_type] || order.service_type.replaceAll('_',' ')}</h3></div><span className={`ride-status status-${order.status}`}>{cargoStatusNames[order.status] || order.status}</span></div>
+        <p className="cargo-route"><span><small>FROM</small>{order.pickup_city}, {order.pickup_region}<em>{order.pickup_label}</em></span><i/><span><small>TO</small>{order.destination_city}, {order.destination_region}<em>{order.destination_label}</em></span></p>
+        <div className="cargo-order-facts"><span>{order.package_count} item{order.package_count===1?'':'s'} · {order.weight_kg} kg · {order.package_size}</span>{order.pickup_at&&<span>Pickup {new Date(order.pickup_at).toLocaleString()}</span>}<span>{order.fragile?'Fragile · ':''}{order.recipient_name} · {order.recipient_phone}</span></div>
+        <p className="cargo-description">{order.contents_description}</p>
+        {order.quote_amount_ngn_kobo&&<div className="cargo-price"><span>Confirmed delivery price</span><b>{formatMoneyKobo(order.quote_amount_ngn_kobo,'NGN')}</b></div>}
+        {order.quote_note&&<p className="cargo-ops-note">{order.quote_note}</p>}{order.issue_note&&<p className="cargo-issue-note">{order.issue_note}</p>}
+        {order.delivery_proof&&<p className="cargo-proof"><b>Delivery confirmation</b> {order.delivery_proof} · {order.delivered_at&&new Date(order.delivered_at).toLocaleString()}</p>}
+        {events[order.id]?.length>0&&<details className="cargo-timeline"><summary>Shipment timeline</summary>{events[order.id].map((event)=><div className="cargo-timeline-event" key={event.id}><i/><div><b>{cargoStatusNames[event.event_type==='quote_accepted'?'accepted':event.event_type]||event.event_type.replaceAll('_',' ')}</b>{event.note&&<p>{event.note}</p>}<time>{new Date(event.created_at).toLocaleString()}</time></div></div>)}</details>}
+        {!admin&&order.status==='quoted'&&<div className="cargo-order-actions"><button className="button primary" disabled={busy===order.id} onClick={()=>acceptQuote(order)}>Accept quote</button><button className="text-action" disabled={busy===order.id} onClick={()=>cancelOrder(order)}>Cancel request</button></div>}
+        {!admin&&order.status==='accepted'&&order.payment_status!=='paid'&&<div className="cargo-pay-panel"><p>Accepting reserved the quoted price. Pay securely to release this delivery for dispatch.</p><button className="button primary" disabled={busy===order.id} onClick={()=>payOrder(order)}>{busy===order.id?'Opening secure checkout…':'Pay securely with Paystack'}</button></div>}
+        {!admin&&order.status==='requested'&&<button className="text-action cargo-cancel-action" disabled={busy===order.id} onClick={()=>cancelOrder(order)}>Cancel request</button>}
+        {admin&&(['requested'].includes(order.status)||(order.status==='issue'&&order.payment_status!=='paid'))&&<div className="cargo-admin-action"><h4>Prepare customer quote</h4><div className="cargo-form-grid"><label className="input-label">Price in naira<input type="number" min="1" step="50" value={quotes[order.id]?.amount??''} onChange={(e)=>setQuotes({...quotes,[order.id]:{...quotes[order.id],amount:e.target.value}})} placeholder="0" /></label><label className="input-label">Pickup / service note<input maxLength="600" value={quotes[order.id]?.note??''} onChange={(e)=>setQuotes({...quotes,[order.id]:{...quotes[order.id],note:e.target.value}})} placeholder="What the price includes" /></label></div><button className="button primary" disabled={busy===order.id} onClick={()=>sendQuote(order)}>Send quote</button></div>}
+        {admin&&['accepted','issue'].includes(order.status)&&order.payment_status==='paid'&&<div className="cargo-admin-action"><h4>{order.status==='issue'?'Reassign after delivery issue':'Assign an approved courier'}</h4><div className="cargo-form-grid"><label className="input-label">Courier vehicle<select value={assignments[order.id]??''} onChange={(e)=>setAssignments({...assignments,[order.id]:e.target.value})}><option value="">Select vehicle</option>{vehicles.map((vehicle)=><option key={vehicle.id} value={`${vehicle.driver_id}|${vehicle.id}`}>{vehicle.vehicle_type} · {vehicle.make} {vehicle.model} · {vehicle.registration_number} · {vehicle.driver_id.slice(0,8)}</option>)}</select></label></div><button className="button primary" disabled={busy===order.id} onClick={()=>assignCourier(order)}>{order.status==='issue'?'Reassign delivery':'Assign delivery'}</button></div>}
+        {admin&&!['delivered','cancelled'].includes(order.status)&&order.payment_status!=='paid'&&<button className="text-action cargo-cancel-action" disabled={busy===order.id} onClick={()=>cancelAsAdmin(order)}>Cancel request</button>}
+      </article>)}</div>}
+      {admin&&<section className="cargo-pending-vehicles"><div><span className="eyebrow">COURIER FLEET</span><h3>Vehicle reviews</h3><p>Only approved driver vehicles can be assigned to customer shipments.</p></div>{pendingVehicles.length?pendingVehicles.map((vehicle)=><article className="cargo-vehicle-review" key={vehicle.id}><div><b>{vehicle.vehicle_type} · {vehicle.make} {vehicle.model}</b><small>{vehicle.registration_number} · courier {vehicle.driver_id.slice(0,8)}</small></div><div className="cargo-order-actions"><button className="button primary" disabled={busy===vehicle.id} onClick={()=>reviewCargoVehicle(vehicle,'approved')}>Approve</button><button className="button ghost" disabled={busy===vehicle.id} onClick={()=>reviewCargoVehicle(vehicle,'rejected')}>Needs correction</button></div></article>):<p className="history-message">No eligible vehicle reviews are waiting.</p>}</section>}
+    </section>}
+    <section className="cargo-service-guide"><article><span>01</span><div><b>Request, then review</b><p>MoVara confirms the service details and price before anything is charged.</p></div></article><article><span>02</span><div><b>Pay securely</b><p>Paystack confirms the amount before dispatch. Your payment is tied to this tracking code.</p></div></article><article><span>03</span><div><b>Follow the handoff</b><p>See courier assignment, pickup, transit, and delivery confirmation in your account.</p></div></article></section>
   </motion.div>;
 }
 
@@ -1184,6 +1333,10 @@ function DrivePage({ user, showToast, navigate }) {
   const [driverCity, setDriverCity] = useState('NG-DEFAULT');
   const [driverCities, setDriverCities] = useState([]);
   const [rides, setRides] = useState([]);
+  const [cargoDeliveries, setCargoDeliveries] = useState([]);
+  const [driverVehicles, setDriverVehicles] = useState([]);
+  const [vehicleDraft, setVehicleDraft] = useState({ type: 'motorcycle', make: '', model: '', registration: '', capacity: '1' });
+  const [deliveryProof, setDeliveryProof] = useState({});
   const [busyRide, setBusyRide] = useState('');
 
   useEffect(() => {
@@ -1193,14 +1346,17 @@ function DrivePage({ user, showToast, navigate }) {
 
   async function refresh() {
     if (!user || !isConfigured) return;
-    const [{ data: role }, { data: verify }, { data: profile }, { data: cityRows }] = await Promise.all([
+    const [{ data: role }, { data: verify }, { data: profile }, { data: cityRows }, { data: cargoRows }, { data: vehicleRows }] = await Promise.all([
       supabase.from('user_roles').select('role').eq('user_id', user.id).eq('role', 'driver').maybeSingle(),
       supabase.from('driver_verifications').select('status').eq('driver_id', user.id).maybeSingle(),
       supabase.from('driver_profiles').select('is_online,city_code').eq('driver_id', user.id).maybeSingle(),
       supabase.from('ride_cities').select('city_code,city_name').eq('active',true).order('city_name'),
+      supabase.from('cargo_orders').select('id,tracking_code,service_type,package_size,package_count,weight_kg,pickup_label,pickup_city,pickup_region,destination_label,destination_city,destination_region,recipient_name,recipient_phone,contents_description,sender_note,status,payment_status,quote_amount_ngn_kobo,pickup_at,created_at,delivery_proof,issue_note').eq('driver_id', user.id).in('status',['assigned','picked_up','in_transit','issue']).order('created_at',{ascending:true}),
+      supabase.from('vehicles').select('id,vehicle_type,make,model,registration_number,capacity,verification').eq('driver_id',user.id).order('created_at',{ascending:false}),
     ]);
     setRoleReady(Boolean(role)); setVerification(verify?.status ?? 'not_submitted'); setOnline(Boolean(profile?.is_online));
     setDriverCity(profile?.city_code ?? 'NG-DEFAULT'); setDriverCities(cityRows ?? []);
+    setCargoDeliveries(cargoRows ?? []); setDriverVehicles(vehicleRows ?? []);
     const [{ data: assigned, error }, offers] = await Promise.all([
       supabase.from('rides').select('id,pickup_label,destination_label,status,driver_arrived_at,rider_no_show_at,estimated_fare_ngn_kobo,driver_earnings_ngn_kobo,driver_commission_ngn_kobo,driver_incentive_ngn_kobo,currency,service_level,passenger_count,scheduled_for,created_at,driver_id').eq('driver_id',user.id).in('status',['accepted','in_progress','completed']).limit(100),
       role && profile?.is_online ? supabase.rpc('driver_poll_ride_offers') : Promise.resolve({data:[],error:null}),
@@ -1215,6 +1371,7 @@ function DrivePage({ user, showToast, navigate }) {
     refresh();
     const channel = supabase.channel(`driver-rides-${user.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cargo_orders' }, refresh)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
@@ -1255,6 +1412,23 @@ function DrivePage({ user, showToast, navigate }) {
     else { showToast(({ accept: 'Ride accepted.', decline: 'Offer declined.', arrived: 'Your arrival was shared with the rider.', no_show: 'Rider no-show recorded and ride cancelled.', in_progress: 'Trip started.', completed: 'Trip completed.' })[action]); await refresh(); }
   }
 
+  async function submitCargoVehicle(event) {
+    event.preventDefault();
+    const { error } = await supabase.rpc('submit_driver_vehicle', { p_vehicle_type: vehicleDraft.type, p_make: vehicleDraft.make.trim(), p_model: vehicleDraft.model.trim(), p_registration_number: vehicleDraft.registration.trim(), p_capacity: Number(vehicleDraft.capacity) });
+    if (error) showToast(error.message || 'Vehicle details could not be submitted.');
+    else { showToast('Vehicle submitted for MoVara review.'); setVehicleDraft({ type: 'motorcycle', make: '', model: '', registration: '', capacity: '1' }); await refresh(); }
+  }
+  async function cargoAction(order, status) {
+    const proof = status === 'delivered' ? (deliveryProof[order.id] ?? '').trim() : status === 'issue' ? (window.prompt('What happened?') ?? '').trim() : '';
+    if (status === 'delivered' && proof.length < 3) return showToast('Add the name of the person who received the delivery.');
+    if (status === 'issue' && proof.length < 3) return;
+    setBusyRide(order.id);
+    const { error } = await supabase.rpc('driver_update_cargo_status', { p_order_id: order.id, p_new_status: status, p_note: proof });
+    setBusyRide('');
+    if (error) showToast(error.message || 'Delivery update could not be saved.');
+    else { showToast(status === 'delivered' ? 'Delivery marked complete.' : status === 'issue' ? 'Issue sent to MoVara operations.' : status === 'picked_up' ? 'Pickup confirmed.' : 'Shipment marked in transit.'); await refresh(); }
+  }
+
   if (!user) return <JoinPage kind="driver" showToast={showToast} navigate={navigate} />;
   if (!roleReady) return <motion.div className="page subpage join-page" {...pageMotion}><span className="eyebrow">DRIVER PARTNER</span><h1>Drive on your terms.</h1><p>Complete driver registration and receive approval before you can go online and accept trips.</p><div className="join-panel"><Icon icon={Car01Icon} size={30} /><h2>{verification === 'approved' ? 'Driver account not active' : `Verification: ${verification.replaceAll('_',' ')}`}</h2><p>Submit your identity and vehicle documents from your account to continue. We only show you trips after approval.</p><button className="button primary" onClick={() => navigate('account')}>Open your account <Icon icon={ArrowRight01Icon} /></button></div></motion.div>;
   const available = rides.filter((ride) => !ride.driver_id && ['requested','matching'].includes(ride.status));
@@ -1263,7 +1437,11 @@ function DrivePage({ user, showToast, navigate }) {
   const dayStart = new Date(); dayStart.setHours(0,0,0,0);
   const weekStart = new Date(dayStart); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
   const earningsIn = (start) => completed.filter((ride) => new Date(ride.created_at) >= start).reduce((sum, ride) => sum + Number(ride.driver_earnings_ngn_kobo ?? 0), 0);
-  return <motion.div className="page subpage" {...pageMotion}><div className="section-head"><div><span className="eyebrow">DRIVER PARTNER</span><h1>Your driving day</h1><p>Trip offers are matched to your approved vehicle and capacity.</p></div><button className={`button ${online ? 'ghost driver-online' : 'primary'}`} onClick={() => setAvailability(!online)}>{online ? 'Go offline' : 'Go online'}</button></div><label className="input-label driver-city">Operating market<select value={driverCity} disabled={online} onChange={(event)=>setDriverCity(event.target.value)}>{driverCities.map((item)=><option key={item.city_code} value={item.city_code}>{item.city_name}</option>)}</select></label><div className="earnings-grid"><article><small>Today</small><b>{formatMoneyKobo(earningsIn(dayStart),'NGN')}</b></article><article><small>This week</small><b>{formatMoneyKobo(earningsIn(weekStart),'NGN')}</b></article><article><small>Completed trips</small><b>{completed.length}</b></article></div><div className="ride-history"><div className="section-head"><div><span className="eyebrow">ON YOUR RADAR</span><h2>Available rides</h2></div><button className="text-action" onClick={refresh}>Refresh</button></div>{!online && <p className="history-message">Go online to receive ride offers. Only verified drivers with an approved, matching vehicle can accept.</p>}{online && available.length === 0 && <p className="history-message">No rides in this market right now. Keep this page open and we’ll refresh as offers arrive.</p>}<div className="ride-history-list">{available.map((ride) => <article className="ride-history-card" key={ride.id}><div className="ride-history-top"><span className="ride-status status-requested">{ride.service_level}</span><b>{formatMoneyKobo(ride.estimated_fare_ngn_kobo,ride.currency)} estimated</b></div><p><span>{ride.pickup_label}</span><i /><span>{ride.destination_label}</span></p><small>{ride.passenger_count} passengers · {new Date(ride.scheduled_for ?? ride.created_at).toLocaleString()}</small><button className="ride-cancel" onClick={() => rideAction(ride,'accept')} disabled={!online || busyRide === ride.id}>{busyRide === ride.id ? 'Accepting…' : 'Accept ride'}</button><button className="text-action" onClick={() => rideAction(ride,'decline')} disabled={busyRide === ride.id}>Decline</button></article>)}</div></div>{active.filter((ride) => ride.status !== 'completed').length > 0 && <div className="ride-history"><div className="section-head"><div><span className="eyebrow">YOUR TRIPS</span><h2>Assigned rides</h2></div></div><div className="ride-history-list">{active.filter((ride) => ride.status !== 'completed').map((ride) => <DriverTripCard key={ride.id} ride={ride} busy={busyRide === ride.id} now={clockNow} onAction={rideAction} />)}</div></div>}{completed.length > 0 && <div className="ride-history"><div className="section-head"><div><span className="eyebrow">YOUR EARNINGS</span><h2>Recent completed rides</h2></div></div><div className="ride-history-list">{completed.slice(0,12).map((ride)=><article className="ride-history-card" key={ride.id}><div className="ride-history-top"><span className="ride-status status-completed">Completed</span><b>{formatMoneyKobo(ride.driver_earnings_ngn_kobo,ride.currency)}</b></div><p><span>{ride.pickup_label}</span><i/><span>{ride.destination_label}</span></p><small>Commission: {formatMoneyKobo(ride.driver_commission_ngn_kobo,ride.currency)} · Incentive: {formatMoneyKobo(ride.driver_incentive_ngn_kobo,ride.currency)}</small></article>)}</div></div>}</motion.div>;
+  return <motion.div className="page subpage" {...pageMotion}><div className="section-head"><div><span className="eyebrow">DRIVER PARTNER</span><h1>Your driving day</h1><p>Trip offers are matched to your approved vehicle and capacity.</p></div><button className={`button ${online ? 'ghost driver-online' : 'primary'}`} onClick={() => setAvailability(!online)}>{online ? 'Go offline' : 'Go online'}</button></div><label className="input-label driver-city">Operating market<select value={driverCity} disabled={online} onChange={(event)=>setDriverCity(event.target.value)}>{driverCities.map((item)=><option key={item.city_code} value={item.city_code}>{item.city_name}</option>)}</select></label><div className="earnings-grid"><article><small>Today</small><b>{formatMoneyKobo(earningsIn(dayStart),'NGN')}</b></article><article><small>This week</small><b>{formatMoneyKobo(earningsIn(weekStart),'NGN')}</b></article><article><small>Completed rides</small><b>{completed.length}</b></article></div>
+    {verification==='approved'&&<section className="ride-history cargo-fleet-panel"><div><span className="eyebrow">CARGO COURIER</span><h2>Register a delivery vehicle</h2><p>Vehicle documents are reviewed before dispatch can assign cargo. Motorcycle, keke, car, van, and truck are supported.</p></div><form className="cargo-form-grid" onSubmit={submitCargoVehicle}><label className="input-label">Vehicle class<select value={vehicleDraft.type} onChange={e=>setVehicleDraft({...vehicleDraft,type:e.target.value})}>{[['motorcycle','Motorcycle'],['keke','Keke'],['car','Car'],['van','Van'],['truck','Truck']].map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label className="input-label">Make<input required maxLength="80" value={vehicleDraft.make} onChange={e=>setVehicleDraft({...vehicleDraft,make:e.target.value})}/></label><label className="input-label">Model<input required maxLength="80" value={vehicleDraft.model} onChange={e=>setVehicleDraft({...vehicleDraft,model:e.target.value})}/></label><label className="input-label">Registration number<input required maxLength="32" value={vehicleDraft.registration} onChange={e=>setVehicleDraft({...vehicleDraft,registration:e.target.value.toUpperCase()})}/></label><label className="input-label">Passenger seats<input type="number" min="1" max="20" required value={vehicleDraft.capacity} onChange={e=>setVehicleDraft({...vehicleDraft,capacity:e.target.value})}/><small>Used for ride offers. Cargo size is checked separately.</small></label><button className="button primary">Submit vehicle for review</button></form><div className="cargo-driver-vehicles">{driverVehicles.map(vehicle=><span key={vehicle.id} className={`ride-status status-${vehicle.verification}`}>{vehicle.vehicle_type} · {vehicle.make} {vehicle.model} · {vehicle.verification.replaceAll('_',' ')}</span>)}</div></section>}
+    <div className="ride-history"><div className="section-head"><div><span className="eyebrow">ON YOUR RADAR</span><h2>Available rides</h2></div><button className="text-action" onClick={refresh}>Refresh</button></div>{!online && <p className="history-message">Go online to receive ride offers. Only verified drivers with an approved, matching vehicle can accept.</p>}{online && available.length === 0 && <p className="history-message">No rides in this market right now. Keep this page open and we’ll refresh as offers arrive.</p>}<div className="ride-history-list">{available.map((ride) => <article className="ride-history-card" key={ride.id}><div className="ride-history-top"><span className="ride-status status-requested">{ride.service_level}</span><b>{formatMoneyKobo(ride.estimated_fare_ngn_kobo,ride.currency)} estimated</b></div><p><span>{ride.pickup_label}</span><i /><span>{ride.destination_label}</span></p><small>{ride.passenger_count} passengers · {new Date(ride.scheduled_for ?? ride.created_at).toLocaleString()}</small><button className="ride-cancel" onClick={() => rideAction(ride,'accept')} disabled={!online || busyRide === ride.id}>{busyRide === ride.id ? 'Accepting…' : 'Accept ride'}</button><button className="text-action" onClick={() => rideAction(ride,'decline')} disabled={busyRide === ride.id}>Decline</button></article>)}</div></div>
+    <div className="ride-history cargo-driver-panel"><div className="section-head"><div><span className="eyebrow">DELIVERY RUNS</span><h2>Assigned cargo</h2></div><button className="text-action" onClick={refresh}>Refresh</button></div>{cargoDeliveries.length? <div className="ride-history-list">{cargoDeliveries.map(order=><article className="cargo-order-card" key={order.id}><div className="cargo-order-top"><div><span className="eyebrow">{order.tracking_code}</span><h3>{cargoServiceNames[order.service_type]}</h3></div><span className={`ride-status status-${order.status}`}>{cargoStatusNames[order.status]}</span></div><p className="cargo-route"><span><small>PICKUP</small>{order.pickup_city}, {order.pickup_region}<em>{order.pickup_label}</em></span><i/><span><small>DELIVERY</small>{order.destination_city}, {order.destination_region}<em>{order.destination_label}</em></span></p><div className="cargo-order-facts"><span>{order.package_size} · {order.package_count} item(s) · {order.weight_kg} kg</span><span>Recipient: {order.recipient_name} · {order.recipient_phone}</span><span>{order.contents_description}</span>{order.sender_note&&<span>Sender note: {order.sender_note}</span>}</div>{order.status==='assigned'&&<button className="button primary" disabled={busyRide===order.id} onClick={()=>cargoAction(order,'picked_up')}>Confirm pickup</button>}{order.status==='picked_up'&&<button className="button primary" disabled={busyRide===order.id} onClick={()=>cargoAction(order,'in_transit')}>Start delivery</button>}{order.status==='in_transit'&&<div className="cargo-driver-complete"><label className="input-label">Who received the shipment?<input required maxLength="500" value={deliveryProof[order.id]??''} onChange={e=>setDeliveryProof({...deliveryProof,[order.id]:e.target.value})} placeholder="Recipient name and handoff detail"/></label><button className="button primary" disabled={busyRide===order.id} onClick={()=>cargoAction(order,'delivered')}>Confirm delivery</button></div>}{order.status!=='issue'&&<button className="text-action" onClick={()=>cargoAction(order,'issue')} disabled={busyRide===order.id}>Report a delivery issue</button>}{order.issue_note&&<p className="cargo-issue-note">Issue: {order.issue_note}</p>}</article>)}</div>:<p className="history-message">No cargo deliveries are assigned yet. Keep your approved contact details current.</p>}</div>
+    {active.filter((ride) => ride.status !== 'completed').length > 0 && <div className="ride-history"><div className="section-head"><div><span className="eyebrow">YOUR TRIPS</span><h2>Assigned rides</h2></div></div><div className="ride-history-list">{active.filter((ride) => ride.status !== 'completed').map((ride) => <DriverTripCard key={ride.id} ride={ride} busy={busyRide === ride.id} now={clockNow} onAction={rideAction} />)}</div></div>}{completed.length > 0 && <div className="ride-history"><div className="section-head"><div><span className="eyebrow">YOUR EARNINGS</span><h2>Recent completed rides</h2></div></div><div className="ride-history-list">{completed.slice(0,12).map((ride)=><article className="ride-history-card" key={ride.id}><div className="ride-history-top"><span className="ride-status status-completed">Completed</span><b>{formatMoneyKobo(ride.driver_earnings_ngn_kobo,ride.currency)}</b></div><p><span>{ride.pickup_label}</span><i/><span>{ride.destination_label}</span></p><small>Commission: {formatMoneyKobo(ride.driver_commission_ngn_kobo,ride.currency)} · Incentive: {formatMoneyKobo(ride.driver_incentive_ngn_kobo,ride.currency)}</small></article>)}</div></div>}</motion.div>;
 }
 
 function DriverTripCard({ ride, busy, now, onAction }) {

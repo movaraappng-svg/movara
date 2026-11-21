@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { AppText as Text } from '../src/AppText';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Car01Icon, Home01Icon, ArrowRight01Icon, Shield01Icon } from '@hugeicons/core-free-icons';
+import { Car01Icon, Home01Icon, ArrowRight01Icon, Shield01Icon, DeliveryBox01Icon } from '@hugeicons/core-free-icons';
 
 const navy = '#142B4A';
 const cream = '#F7F5F0';
@@ -14,6 +14,7 @@ export default function HomeScreen() {
     <Text style={styles.sectionTitle}>What brings you here?</Text>
     <View style={styles.cards}>
       <Pressable onPress={() => router.push('/rides')} style={({ pressed }) => [styles.card, pressed && styles.pressed]}><View style={styles.icon}><HugeiconsIcon icon={Car01Icon} size={25} color={navy} /></View><View style={styles.cardText}><Text style={styles.cardTitle}>Get there</Text><Text style={styles.cardCopy}>Find a ride for your day</Text></View><HugeiconsIcon icon={ArrowRight01Icon} size={20} color={navy} /></Pressable>
+      <Pressable onPress={() => router.push('/cargo')} style={({ pressed }) => [styles.card, pressed && styles.pressed]}><View style={styles.icon}><HugeiconsIcon icon={DeliveryBox01Icon} size={25} color={navy} /></View><View style={styles.cardText}><Text style={styles.cardTitle}>Send something</Text><Text style={styles.cardCopy}>Book a courier and follow delivery</Text></View><HugeiconsIcon icon={ArrowRight01Icon} size={20} color={navy} /></Pressable>
       <Pressable onPress={() => router.push('/homes')} style={({ pressed }) => [styles.card, pressed && styles.pressed]}><View style={styles.icon}><HugeiconsIcon icon={Home01Icon} size={25} color={navy} /></View><View style={styles.cardText}><Text style={styles.cardTitle}>Find your place</Text><Text style={styles.cardCopy}>Explore homes across Nigeria</Text></View><HugeiconsIcon icon={ArrowRight01Icon} size={20} color={navy} /></Pressable>
       <Pressable onPress={() => router.push('/landlord')} style={({ pressed }) => [styles.card, pressed && styles.pressed]}><View style={styles.icon}><HugeiconsIcon icon={Home01Icon} size={25} color={navy} /></View><View style={styles.cardText}><Text style={styles.cardTitle}>List a property</Text><Text style={styles.cardCopy}>Manage your home listings and enquiries</Text></View><HugeiconsIcon icon={ArrowRight01Icon} size={20} color={navy} /></Pressable>
       <Pressable onPress={() => router.push('/driver')} style={({ pressed }) => [styles.card, pressed && styles.pressed]}><View style={styles.icon}><HugeiconsIcon icon={Car01Icon} size={25} color={navy} /></View><View style={styles.cardText}><Text style={styles.cardTitle}>Drive with MoVara</Text><Text style={styles.cardCopy}>Apply, manage trips, and track earnings</Text></View><HugeiconsIcon icon={ArrowRight01Icon} size={20} color={navy} /></Pressable>
