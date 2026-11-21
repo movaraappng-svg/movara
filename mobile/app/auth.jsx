@@ -17,20 +17,22 @@ export default function AuthScreen() {
     setBusy(false);
     if (result.error) return Alert.alert('Could not continue', result.error.message);
     if (mode === 'signup' && !result.data.session) return Alert.alert('Check your email', 'Use the confirmation link we sent to finish creating your account.');
-    router.replace('/');
+    router.replace('/account');
   }
   async function google() {
     if (!isConfigured) return Alert.alert('Setup needed', 'Add the Supabase settings in mobile/.env first.');
     const redirectTo = Linking.createURL('auth/callback');
+    setBusy(true);
     const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo, skipBrowserRedirect: true } });
-    if (error) return Alert.alert('Google sign-in unavailable', error.message);
+    if (error) { setBusy(false); return Alert.alert('Google sign-in unavailable', error.message); }
     const response = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-    if (response.type !== 'success') return;
+    if (response.type !== 'success') { setBusy(false); return; }
     const url = new URL(response.url); const code = url.searchParams.get('code');
-    if (!code) return Alert.alert('Sign-in incomplete', 'Please try Google sign-in again.');
+    if (!code) { setBusy(false); return Alert.alert('Sign-in incomplete', 'Please try Google sign-in again.'); }
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+    setBusy(false);
     if (exchangeError) return Alert.alert('Could not finish sign-in', exchangeError.message);
-    router.replace('/');
+    router.replace('/account');
   }
   return <ScrollView contentContainerStyle={styles.page}><Pressable onPress={() => router.back()}><Text style={styles.back}>‹  Back</Text></Pressable><View style={styles.panel}><Text style={styles.kicker}>WELCOME TO MOVARA</Text><Text style={styles.title}>{mode === 'signin' ? 'Good to see you.' : 'Let’s get you started.'}</Text><Text style={styles.copy}>Keep your journeys and home search together.</Text><View style={styles.tabs}><Pressable onPress={() => setMode('signin')} style={[styles.tab, mode === 'signin' && styles.active]}><Text style={styles.tabText}>Sign in</Text></Pressable><Pressable onPress={() => setMode('signup')} style={[styles.tab, mode === 'signup' && styles.active]}><Text style={styles.tabText}>Create account</Text></Pressable></View>{mode === 'signup' && <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Full name"/>}<TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Email address" autoCapitalize="none" keyboardType="email-address"/><TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder="Password, at least 8 characters" secureTextEntry autoCapitalize="none"/><Pressable style={styles.button} onPress={submit} disabled={busy}><Text style={styles.buttonText}>{busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}</Text></Pressable><Text style={styles.or}>OR</Text><Pressable style={styles.google} onPress={google}><Text style={styles.googleText}>Continue with Google</Text></Pressable><Text style={styles.foot}>A secure account lets you save rides, enquiries and profile details.</Text></View></ScrollView>;
 }

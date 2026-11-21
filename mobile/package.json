@@ -32,7 +32,6 @@
     "react-native-svg": "15.16.0"
   },
   "devDependencies": {
-    "eas-cli": "^27.11.0",
     "react-dom": "19.3.0"
   }
 }
