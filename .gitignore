@@ -4,6 +4,9 @@ node_modules/
 .env.*
 !.env.example
 **/dist/
+mobile/android/
+mobile/ios/
+movara-preview-crash-check.apk
 **/.expo/
 **/.expo-export-check*/
 .DS_Store
