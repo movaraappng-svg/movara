@@ -933,16 +933,31 @@ function PropertyInboxPage({ user, showToast, navigate }) {
 
 function AuthPage({ showToast, navigate, user }) {
   const [mode, setMode] = useState('signin'); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [name, setName] = useState(''); const [busy, setBusy] = useState(false);
-  useEffect(() => { if (user) navigate('account'); }, [user]);
+  const authRedirect = new URL(import.meta.env.BASE_URL || '/', window.location.origin).toString();
+  useEffect(() => { if (user) navigate('home'); }, [user]);
   async function submit(event) {
     event.preventDefault();
     if (!isConfigured) return showToast('Account service is not configured yet.');
     setBusy(true);
-    const result = mode === 'signin' ? await supabase.auth.signInWithPassword({email,password}) : await supabase.auth.signUp({email,password,options:{data:{full_name:name}}});
-    setBusy(false);
-    showToast(result.error ? result.error.message : mode === 'signin' ? 'You are signed in.' : 'Check your email to confirm your account.');
+    try {
+      const result = mode === 'signin'
+        ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
+        : await supabase.auth.signUp({ email: email.trim(), password, options: { data: { full_name: name.trim() }, emailRedirectTo: authRedirect } });
+      setBusy(false);
+      if (result.error) return showToast(result.error.message);
+      if (mode === 'signup' && !result.data.session) return showToast('Check your email, then use the confirmation link to finish creating your account.');
+      showToast(mode === 'signin' ? 'Welcome back.' : 'Your account is ready. Welcome to MoVara.');
+      navigate('home');
+    } catch (error) { setBusy(false); showToast(error?.message || 'We could not sign you in. Please try again.'); }
   }
-  async function google() { if (!isConfigured) return showToast('Account service is not configured yet.'); const { error } = await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.origin}}); if(error) showToast(error.message); }
+  async function google() {
+    if (!isConfigured) return showToast('Account service is not configured yet.');
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: authRedirect } });
+      if (error) { setBusy(false); showToast(error.message); }
+    } catch (error) { setBusy(false); showToast(error?.message || 'Google sign-in could not start. Please try again.'); }
+  }
   return <motion.div className="page subpage auth-page" {...pageMotion}><form className="panel auth-panel" onSubmit={submit}><span className="auth-mark"><Icon icon={Shield01Icon} size={30} /></span><span className="eyebrow">WELCOME TO MOVARA</span><h1>{mode === 'signin' ? 'Good to see you.' : 'Let’s get you started.'}</h1><p>Sign in to keep your journeys and home search together.</p><div className="auth-tabs"><button type="button" className={mode === 'signin' ? 'selected' : ''} onClick={() => setMode('signin')}>Sign in</button><button type="button" className={mode === 'signup' ? 'selected' : ''} onClick={() => setMode('signup')}>Create account</button></div>{mode === 'signup' && <label className="input-label">Full name<input value={name} onChange={(e)=>setName(e.target.value)} required placeholder="Your name" /></label>}<label className="input-label">Email address<input type="email" autoComplete="email" value={email} onChange={(e)=>setEmail(e.target.value)} required placeholder="you@example.com" /></label><label className="input-label">Password<input type="password" autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} minLength={8} value={password} onChange={(e)=>setPassword(e.target.value)} required placeholder="At least 8 characters" /></label><button className="button primary full" disabled={busy}>{busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'} <Icon icon={ArrowRight01Icon} /></button><div className="or"><span /> or <span /></div><button type="button" className="button google full" onClick={google}>G <span>Continue with Google</span></button><small className="auth-foot">By continuing, you agree to use MoVara with care and respect.</small></form></motion.div>;
 }
 
