@@ -25,15 +25,32 @@ Deno.serve(async (request) => {
     : ride?.status === 'cancelled' && ride?.payment_method === 'paystack';
   if (error || !ride || !allowed || !amount || amount <= 0) return json({ error: paymentType === 'ride' ? 'Online payment is available after a driver accepts this ride.' : 'There is no online cancellation fee due for this ride.' }, 409, origin);
   if ((ride.currency ?? 'NGN') !== 'NGN') return json({ error: 'Paystack checkout is currently available for Nigerian naira rides only.' }, 409, origin);
-  const { data: existing } = await admin.from('payments').select('provider_reference,status').eq('ride_id', ride.id).eq('payment_type', paymentType).in('status', ['pending','succeeded']).maybeSingle();
+  const { data: existing } = await admin.from('payments').select('provider_reference,status,authorization_url,checkout_expires_at').eq('ride_id', ride.id).eq('payment_type', paymentType).in('status', ['pending','succeeded']).maybeSingle();
   if (existing?.status === 'succeeded') return json({ paid: true }, 200, origin);
-  if (existing?.status === 'pending') return json({ error: 'A checkout has already been started. Complete it or contact support.' }, 409, origin);
+  if (existing?.status === 'pending') {
+    if (existing.authorization_url && existing.checkout_expires_at && new Date(existing.checkout_expires_at).getTime() > Date.now()) {
+      return json({ authorizationUrl: existing.authorization_url, reference: existing.provider_reference }, 200, origin);
+    }
+    return json({ error: 'A payment is still being confirmed. Refresh your ride in a moment or contact support if you were charged.' }, 409, origin);
+  }
   const reference = `movara_${paymentType === 'ride' ? 'ride' : 'cancel'}_${ride.id.replaceAll('-', '')}_${crypto.randomUUID().replaceAll('-', '')}`;
+  const { data: payment, error: insertError } = await admin.from('payments').insert({ ride_id: ride.id, payer_id: user.id, payment_type: paymentType, amount_kobo: amount, currency: 'NGN', status: 'pending', provider: 'paystack', provider_reference: reference }).select('id').single();
+  if (insertError || !payment) {
+    console.error('Payment reservation failed', insertError);
+    return json({ error: 'A checkout may already be open. Refresh your ride before trying again.' }, 409, origin);
+  }
   const callback = Deno.env.get('PAYSTACK_CALLBACK_URL') ?? 'https://movaraappng-svg.github.io/movara/';
   const response = await fetch('https://api.paystack.co/transaction/initialize', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: user.email, amount, currency: 'NGN', reference, callback_url: callback, metadata: { ride_id: ride.id, customer_id: user.id, payment_type: paymentType } }) });
   const result = await response.json();
-  if (!response.ok || !result.status || !result.data?.authorization_url) { console.error('Paystack initialize rejected', result.message); return json({ error: 'Checkout could not be started. Please try again.' }, 502, origin); }
-  const { error: insertError } = await admin.from('payments').insert({ ride_id: ride.id, payer_id: user.id, payment_type: paymentType, amount_kobo: amount, currency: 'NGN', status: 'pending', provider: 'paystack', provider_reference: reference });
-  if (insertError) { console.error('Payment record insert failed', insertError); return json({ error: 'Checkout could not be recorded. Please contact support before retrying.' }, 500, origin); }
-  return json({ authorizationUrl: result.data.authorization_url }, 200, origin);
+  if (!response.ok || !result.status || !result.data?.authorization_url) {
+    console.error('Paystack initialize rejected', result.message);
+    await admin.from('payments').update({ status: 'failed', updated_at: new Date().toISOString() }).eq('id', payment.id).eq('status', 'pending');
+    return json({ error: 'Checkout could not be started. Please try again.' }, 502, origin);
+  }
+  const { error: saveError } = await admin.from('payments').update({ authorization_url: result.data.authorization_url, checkout_expires_at: new Date(Date.now() + 25 * 60_000).toISOString() }).eq('id', payment.id).eq('status', 'pending');
+  if (saveError) {
+    console.error('Paystack checkout URL could not be saved', saveError);
+    return json({ error: 'Checkout started but could not be attached to your ride. Contact support before retrying.' }, 500, origin);
+  }
+  return json({ authorizationUrl: result.data.authorization_url, reference }, 200, origin);
 });

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { AppText as Text } from '../src/AppText';
 import * as Location from 'expo-location';
 import { Camera, GeoJSONSource, Layer, Map as MapLibre } from '@maplibre/maplibre-react-native';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { supabase, isConfigured } from '../src/supabase';
 
 const navy = '#172F4E';
@@ -124,11 +125,26 @@ export default function RidesScreen() {
 
   async function payForRide(ride) {
     setCheckout(ride.id);
-    const { data, error } = await supabase.functions.invoke('initialize-paystack-payment', { body: { rideId: ride.id, paymentType: 'ride' } });
-    setCheckout(null);
-    if (error || data?.error) return Alert.alert('Checkout unavailable', data?.error || 'Please try again.');
-    if (data?.authorizationUrl) await Linking.openURL(data.authorizationUrl);
-    else if (data?.paid) Alert.alert('Already paid', 'This ride payment is confirmed.');
+    try {
+      const { data, error } = await supabase.functions.invoke('initialize-paystack-payment', { body: { rideId: ride.id, paymentType: 'ride' } });
+      if (error || data?.error) throw error ?? new Error(data?.error || 'Please try again.');
+      if (data?.paid) {
+        Alert.alert('Already paid', 'This ride payment is confirmed.');
+        await loadRides();
+        return;
+      }
+      if (!data?.authorizationUrl || !data?.reference) throw new Error('Secure checkout could not be opened. Please try again.');
+      await WebBrowser.openBrowserAsync(data.authorizationUrl);
+      const { data: verification, error: verificationError } = await supabase.functions.invoke('verify-paystack-payment', { body: { reference: data.reference } });
+      if (verificationError) throw verificationError;
+      if (verification?.paid) Alert.alert('Payment confirmed', 'Your ride payment has been verified securely.');
+      else Alert.alert('Payment not confirmed yet', verification?.error || 'If you completed payment, allow a moment for confirmation, then refresh your ride.');
+      await loadRides();
+    } catch (error) {
+      Alert.alert('Checkout unavailable', error?.message || 'Please try again.');
+    } finally {
+      setCheckout(null);
+    }
   }
 
   if (authLoading) return <View style={styles.loading}><ActivityIndicator color={navy}/></View>;
