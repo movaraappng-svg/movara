@@ -62,6 +62,15 @@ function Icon({ icon, size = 20, className = '' }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} className={className} />;
 }
 
+function GoogleMark() {
+  return <svg className="google-mark" viewBox="0 0 24 24" role="img" aria-label="Google" focusable="false">
+    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" />
+    <path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.12-1.43.34-2.1V7.06H2.18A11 11 0 0 0 1 12c0 1.78.43 3.46 1.18 4.94l3.66-2.84z" />
+    <path fill="#EA4335" d="M12 5.37c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.08 14.97 1 12 1a11 11 0 0 0-9.82 6.06l3.66 2.84C6.71 7.3 9.14 5.37 12 5.37z" />
+  </svg>;
+}
+
 export function App() {
   const [page, setPage] = useState('home');
   const [user, setUser] = useState(null);
@@ -851,7 +860,24 @@ function AuthPage({ showToast, navigate, user }) {
       if (error) { setBusy(false); showToast(error.message); }
     } catch (error) { setBusy(false); showToast(error?.message || 'Google sign-in could not start. Please try again.'); }
   }
-  return <motion.div className="page subpage auth-page" {...pageMotion}><form className="panel auth-panel" onSubmit={submit}><span className="auth-mark"><Icon icon={Shield01Icon} size={30} /></span><span className="eyebrow">WELCOME TO MOVARA</span><h1>{mode === 'signin' ? 'Good to see you.' : 'Let’s get you started.'}</h1><p>Sign in to keep your journeys and home search together.</p><div className="auth-tabs"><button type="button" className={mode === 'signin' ? 'selected' : ''} onClick={() => setMode('signin')}>Sign in</button><button type="button" className={mode === 'signup' ? 'selected' : ''} onClick={() => setMode('signup')}>Create account</button></div>{mode === 'signup' && <label className="input-label">Full name<input value={name} onChange={(e)=>setName(e.target.value)} required placeholder="Your name" /></label>}<label className="input-label">Email address<input type="email" autoComplete="email" value={email} onChange={(e)=>setEmail(e.target.value)} required placeholder="you@example.com" /></label><label className="input-label">Password<input type="password" autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} minLength={8} value={password} onChange={(e)=>setPassword(e.target.value)} required placeholder="At least 8 characters" /></label><button className="button primary full" disabled={busy}>{busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'} <Icon icon={ArrowRight01Icon} /></button><div className="or"><span /> or <span /></div><button type="button" className="button google full" onClick={google}>G <span>Continue with Google</span></button><small className="auth-foot">By continuing, you agree to use MoVara with care and respect.</small></form></motion.div>;
+  return <motion.div className="page subpage auth-page" {...pageMotion}><form className="panel auth-panel" onSubmit={submit}>
+    <span className="auth-mark"><Icon icon={Shield01Icon} size={30} /></span><span className="eyebrow">WELCOME TO MOVARA</span>
+    <h1>{mode === 'signin' ? 'Good to see you.' : 'Let’s get you started.'}</h1>
+    <p>{mode === 'signin' ? 'Sign in to pick up where you left off with rides, homes, and your account.' : 'Create an account to save your rides, home search, and profile details.'}</p>
+    <div className="auth-tabs" role="group" aria-label="Choose sign in or account creation">
+      <button type="button" className={mode === 'signin' ? 'selected' : ''} aria-pressed={mode === 'signin'} onClick={() => setMode('signin')}>Sign in</button>
+      <button type="button" className={mode === 'signup' ? 'selected' : ''} aria-pressed={mode === 'signup'} onClick={() => setMode('signup')}>Create account</button>
+    </div>
+    {mode === 'signup' && <label className="input-label">Full name<input value={name} onChange={(e)=>setName(e.target.value)} required autoComplete="name" placeholder="Your name" /></label>}
+    <label className="input-label">Email address<input type="email" autoComplete="email" value={email} onChange={(e)=>setEmail(e.target.value)} required placeholder="you@example.com" /></label>
+    <label className="input-label">Password<input type="password" autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} minLength={8} value={password} onChange={(e)=>setPassword(e.target.value)} required placeholder={mode === 'signin' ? 'Your password' : 'At least 8 characters'} />
+      {mode === 'signup' && <small className="auth-help">Use 8 or more characters. After creating your account, check your email for a confirmation link.</small>}
+    </label>
+    <button className="button primary full" disabled={busy}>{busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'} <Icon icon={ArrowRight01Icon} /></button>
+    <div className="or"><span /> or <span /></div>
+    <button type="button" className="button google full" onClick={google} disabled={busy}><GoogleMark /><span>{busy ? 'Connecting…' : 'Continue with Google'}</span></button>
+    <small className="auth-foot">{mode === 'signup' ? 'New here? Your email confirmation keeps your account secure.' : 'Your account keeps your MoVara details together, wherever you go.'}</small>
+  </form></motion.div>;
 }
 
 function AccountPage({ user, navigate, showToast }) {

@@ -42,3 +42,4 @@ input,select,textarea{line-height:1.45}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 .route-attribution{display:block;margin-top:6px;font-size:10px;line-height:1.4}
 .map-loading{display:grid;place-items:center;background:#e9e5dc;color:#172f4e;font-weight:600}
+.google-mark{width:20px;height:20px;flex:0 0 20px}.auth-help{color:var(--muted);font-weight:400;font-size:12px;line-height:1.5}
