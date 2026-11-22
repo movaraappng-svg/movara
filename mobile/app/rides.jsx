@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { AppText as Text } from '../src/AppText';
 import * as Location from 'expo-location';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { Camera, GeoJSONSource, Layer, Map as MapLibre } from '@maplibre/maplibre-react-native';
 import { router } from 'expo-router';
 import { supabase, isConfigured } from '../src/supabase';
 
@@ -32,6 +32,7 @@ function decodePolyline(encoded = '') {
 function money(kobo) { return `₦${Math.round(Number(kobo ?? 0) / 100).toLocaleString()}`; }
 
 export default function RidesScreen() {
+  const camera = useRef(null);
   const [user, setUser] = useState(null); const [authLoading, setAuthLoading] = useState(true);
   const [pickup, setPickup] = useState(''); const [destination, setDestination] = useState('');
   const [pickupPoint, setPickupPoint] = useState(null); const [destinationPoint, setDestinationPoint] = useState(null);
@@ -41,6 +42,14 @@ export default function RidesScreen() {
   const [quote, setQuote] = useState(null); const [quoteLoading, setQuoteLoading] = useState(false); const [quoteError, setQuoteError] = useState('');
   const [locating, setLocating] = useState(false); const [busy, setBusy] = useState(false); const [rides, setRides] = useState([]); const [rideLoading, setRideLoading] = useState(false); const [checkout, setCheckout] = useState(null);
   const routeCoordinates = useMemo(() => decodePolyline(quote?.encodedPolyline), [quote?.encodedPolyline]);
+  const mapFeatures = useMemo(() => ({
+    type: 'FeatureCollection',
+    features: [
+      ...(pickupPoint ? [{ type: 'Feature', properties: { kind: 'pickup' }, geometry: { type: 'Point', coordinates: [pickupPoint.longitude, pickupPoint.latitude] } }] : []),
+      ...(destinationPoint ? [{ type: 'Feature', properties: { kind: 'destination' }, geometry: { type: 'Point', coordinates: [destinationPoint.longitude, destinationPoint.latitude] } }] : []),
+      ...(routeCoordinates.length > 1 ? [{ type: 'Feature', properties: { kind: 'route' }, geometry: { type: 'LineString', coordinates: routeCoordinates.map(({ latitude, longitude }) => [longitude, latitude]) } }] : []),
+    ],
+  }), [pickupPoint, destinationPoint, routeCoordinates]);
 
   async function loadRides(silent = false) {
     if (!isConfigured || !user) return;
@@ -76,6 +85,7 @@ export default function RidesScreen() {
     if (mapTarget === 'pickup') { setPickupPoint(point); setPickup(label); }
     else { setDestinationPoint(point); setDestination(label); }
     setMapRegion((current) => ({ ...point, latitudeDelta: Math.min(current.latitudeDelta, .06), longitudeDelta: Math.min(current.longitudeDelta, .06) }));
+    camera.current?.flyTo({ center: [point.longitude, point.latitude], zoom: 14, duration: 450 });
   }
 
   async function currentLocation() {
@@ -124,8 +134,8 @@ export default function RidesScreen() {
   if (authLoading) return <View style={styles.loading}><ActivityIndicator color={navy}/></View>;
   const region = mapRegion;
   return <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled"><Pressable onPress={() => router.back()}><Text style={styles.back}>‹  Back</Text></Pressable><Text style={styles.kicker}>YOUR NEXT JOURNEY</Text><Text style={styles.title}>Book a ride</Text><Text style={styles.copy}>A live road route and fare before you send your request.</Text>
-    <View style={styles.mapFrame}><MapView style={styles.map} region={region} onRegionChangeComplete={setMapRegion} onPress={(event) => setSelectedPoint(event.nativeEvent.coordinate)}><Polyline coordinates={routeCoordinates} strokeColor="#B99B62" strokeWidth={5}/>{pickupPoint && <Marker coordinate={pickupPoint} title="Pickup" pinColor="#172F4E"/>}{destinationPoint && <Marker coordinate={destinationPoint} title="Destination" pinColor="#B35C54"/>}</MapView></View>
-    <Text style={styles.mapHint}>Tap map after selecting which pin to place.</Text>
+    <View style={styles.mapFrame}><MapLibre style={styles.map} mapStyle="https://tiles.openfreemap.org/styles/liberty" attribution onPress={(event) => { const { latitude, longitude } = event.nativeEvent.lngLat; setSelectedPoint({ latitude, longitude }); }}><Camera ref={camera} initialViewState={{ center: [region.longitude, region.latitude], zoom: 5 }}/><GeoJSONSource id="movara-ride-features" data={mapFeatures}><Layer id="movara-ride-route" type="line" filter={["==", ["get", "kind"], "route"]} paint={{ "line-color": "#B99B62", "line-width": 5, "line-opacity": 0.94 }}/><Layer id="movara-ride-pins" type="circle" filter={["in", ["get", "kind"], ["literal", ["pickup", "destination"]]]} paint={{ "circle-radius": 8, "circle-color": ["match", ["get", "kind"], "destination", "#B35C54", "#172F4E"], "circle-stroke-width": 3, "circle-stroke-color": "#FFFFFF" }}/></GeoJSONSource></MapLibre></View>
+    <Text style={styles.mapHint}>Map data © OpenStreetMap contributors · OpenFreeMap. Tap the map after choosing which pin to place.</Text>
     <View style={styles.mapActions}><Pressable onPress={() => setMapTarget('pickup')} style={[styles.pinButton, mapTarget === 'pickup' && styles.pinSelected]}><Text style={styles.pinText}>Set pickup pin</Text></Pressable><Pressable onPress={() => setMapTarget('destination')} style={[styles.pinButton, mapTarget === 'destination' && styles.pinSelected]}><Text style={styles.pinText}>Set destination pin</Text></Pressable></View>
     <Pressable style={styles.location} onPress={currentLocation} disabled={locating}><Text style={styles.locationText}>{locating ? 'Finding your location…' : '◎  Use my current location for pickup'}</Text></Pressable>
     <TextInput style={styles.input} value={pickup} onChangeText={(value) => { setPickup(value); setPickupPoint(null); }} placeholder="Pickup location" placeholderTextColor="#8A9095" accessibilityLabel="Pickup location"/><TextInput style={styles.input} value={destination} onChangeText={(value) => { setDestination(value); setDestinationPoint(null); }} placeholder="Destination" placeholderTextColor="#8A9095" accessibilityLabel="Destination"/>

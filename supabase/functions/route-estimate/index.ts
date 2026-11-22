@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { calculateGoogleRoute, signQuote, validPoint } from '../_shared/google-routes.ts';
+import { calculateOpenRouteServiceRoute } from '../_shared/openrouteservice.ts';
 import { calculateFare } from '../_shared/fare-engine.mjs';
 
 const origins = new Set(['https://movaraappng-svg.github.io', 'http://localhost:5173', 'http://127.0.0.1:5173']);
@@ -28,9 +29,10 @@ Deno.serve(async (request) => {
   const url = Deno.env.get('SUPABASE_URL');
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? Deno.env.get('SUPABASE_PUBLISHABLE_KEY');
   const mapsKey = Deno.env.get('GOOGLE_MAPS_ROUTES_API_KEY');
+  const openRouteServiceKey = Deno.env.get('ORS_API_KEY');
   const signingSecret = Deno.env.get('RIDE_QUOTE_HMAC_SECRET');
   if (!authorization?.startsWith('Bearer ')) return json({ error: 'Sign in to calculate a route.' }, 401, origin);
-  if (!url || !anon || !mapsKey || !signingSecret) return json({ error: 'Live route quotes are not configured yet.' }, 503, origin);
+  if (!url || !anon || (!mapsKey && !openRouteServiceKey) || !signingSecret) return json({ error: 'Live route quotes are not configured yet.' }, 503, origin);
 
   const userClient = createClient(url, anon, { auth: { persistSession: false }, global: { headers: { Authorization: authorization } } });
   const { data: { user }, error: authError } = await userClient.auth.getUser();
@@ -45,7 +47,9 @@ Deno.serve(async (request) => {
   }
   const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
   try {
-    const route = await calculateGoogleRoute(body.origin, body.destination, mapsKey, typeof body.scheduledFor === 'string' ? body.scheduledFor : null);
+    const route = openRouteServiceKey
+      ? await calculateOpenRouteServiceRoute(body.origin, body.destination, openRouteServiceKey)
+      : await calculateGoogleRoute(body.origin, body.destination, mapsKey!, typeof body.scheduledFor === 'string' ? body.scheduledFor : null);
     let cityCode = typeof body.cityCode === 'string' && /^[A-Z0-9-]{2,24}$/.test(body.cityCode) ? body.cityCode : 'NG-DEFAULT';
     let { data: city } = await admin.from('ride_cities').select('city_code,active,currency').eq('city_code', cityCode).maybeSingle();
     if (!city?.active) {

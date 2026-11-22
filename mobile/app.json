@@ -15,6 +15,7 @@
     "userInterfaceStyle": "light",
     "plugins": [
       "expo-router",
+      "@maplibre/maplibre-react-native",
       "./plugins/with-android-workmanager-keep-rules",
       [
         "expo-location",

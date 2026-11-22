@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   ArrowRight01Icon, ArrowUpRight01Icon, Building03Icon, Car01Icon,
@@ -17,150 +19,111 @@ const pageMotion = {
 
 const nigerianStates = ['Abia','Adamawa','Akwa Ibom','Anambra','Bauchi','Bayelsa','Benue','Borno','Cross River','Delta','Ebonyi','Edo','Ekiti','Enugu','FCT','Gombe','Imo','Jigawa','Kaduna','Kano','Katsina','Kebbi','Kogi','Kwara','Lagos','Nasarawa','Niger','Ogun','Ondo','Osun','Oyo','Plateau','Rivers','Sokoto','Taraba','Yobe','Zamfara'];
 const defaultCenter = [9.082, 8.6753];
-const googleMapsKey = import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY?.trim();
+function decodePolyline(encoded = '') {
+  const points = []; let index = 0; let latitude = 0; let longitude = 0;
+  while (index < encoded.length) {
+    let result = 0; let shift = 0; let byte;
+    do { byte = encoded.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20 && index < encoded.length);
+    latitude += (result & 1) ? ~(result >> 1) : (result >> 1);
+    result = 0; shift = 0;
+    do { byte = encoded.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20 && index < encoded.length);
+    longitude += (result & 1) ? ~(result >> 1) : (result >> 1);
+    points.push([latitude / 1e5, longitude / 1e5]);
+  }
+  return points;
+}
 function formatMoneyKobo(amount, currency = 'NGN') {
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(Math.round(Number(amount ?? 0) / 100)); }
   catch { return `${currency} ${Math.round(Number(amount ?? 0) / 100).toLocaleString()}`; }
 }
 
-function useGoogleMaps() {
-  const [status, setStatus] = useState(() => window.google?.maps ? 'ready' : googleMapsKey ? 'loading' : 'missing');
-  useEffect(() => {
-    if (!googleMapsKey || window.google?.maps) { setStatus(googleMapsKey ? 'ready' : 'missing'); return undefined; }
-    const prior = document.getElementById('movara-google-maps');
-    const script = prior ?? document.createElement('script');
-    const handleLoad = () => setStatus('ready');
-    const handleError = () => setStatus('error');
-    script.addEventListener('load', handleLoad);
-    script.addEventListener('error', handleError);
-    if (!prior) {
-      script.id = 'movara-google-maps';
-      script.async = true;
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsKey)}&v=weekly&loading=async&libraries=places,geometry`;
-      document.head.appendChild(script);
-    }
-    return () => { script.removeEventListener('load', handleLoad); script.removeEventListener('error', handleError); };
-  }, []);
-  return status;
-}
 
-function GoogleMapCanvas({ status, pickupPoint, destinationPoint, driverPoint, encodedPolyline, onPick }) {
+function GoogleMapCanvas({ pickupPoint, destinationPoint, driverPoint, encodedPolyline, onPick }) {
   const container = useRef(null);
   const map = useRef(null);
   const onPickRef = useRef(onPick);
-  const markers = useRef({ pickup: null, destination: null });
-  const route = useRef(null);
+  const markers = useRef({});
 
   useEffect(() => { onPickRef.current = onPick; }, [onPick]);
 
   useEffect(() => {
-    if (status !== 'ready' || !container.current || map.current) return undefined;
-    map.current = new window.google.maps.Map(container.current, {
-      center: { lat: defaultCenter[0], lng: defaultCenter[1] },
-      zoom: 5,
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: true,
-      clickableIcons: false,
-      gestureHandling: 'greedy',
-    });
-    const clickListener = map.current.addListener('click', (event) => {
-      if (event.latLng) onPickRef.current({ lat: event.latLng.lat(), lng: event.latLng.lng() });
+    if (!container.current || map.current) return undefined;
+    map.current = new maplibregl.Map({ container: container.current, style: 'https://tiles.openfreemap.org/styles/liberty', center: [defaultCenter[1], defaultCenter[0]], zoom: 5, attributionControl: true });
+    map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    const clickListener = (event) => onPickRef.current({ lat: event.lngLat.lat, lng: event.lngLat.lng });
+    map.current.on('click', clickListener);
+    map.current.on('load', () => {
+      map.current.addSource('movara-route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.current.addLayer({ id: 'movara-route-line', type: 'line', source: 'movara-route', paint: { 'line-color': '#b89a62', 'line-width': 5, 'line-opacity': 0.94 } });
     });
     return () => {
-      clickListener.remove();
-      Object.values(markers.current).forEach((marker) => marker?.setMap(null));
-      route.current?.setMap(null);
+      map.current?.off('click', clickListener);
+      Object.values(markers.current).forEach((marker) => marker.remove());
+      markers.current = {};
+      map.current?.remove();
       map.current = null;
     };
-  }, [status]);
+  }, []);
 
   useEffect(() => {
-    if (!map.current || status !== 'ready') return;
-    const entries = [['pickup', pickupPoint, 'Pickup'], ['destination', destinationPoint, 'Destination'], ['driver', driverPoint, 'Driver location']];
+    if (!map.current) return;
+    const entries = [['pickup', pickupPoint, 'Pickup', '#172f4e'], ['destination', destinationPoint, 'Destination', '#b35c54'], ['driver', driverPoint, 'Driver location', '#47825c']];
     entries.forEach(([key, point, title]) => {
       if (point) {
-        if (!markers.current[key]) markers.current[key] = new window.google.maps.Marker({ map: map.current, title });
-        markers.current[key].setPosition({ lat: point[0], lng: point[1] });
+        if (!markers.current[key]) {
+          const element = document.createElement('div'); element.className = 'map-marker'; element.style.backgroundColor = colorForMarker(key); element.title = title;
+          markers.current[key] = new maplibregl.Marker({ element }).setLngLat([point[1], point[0]]).addTo(map.current);
+        } else markers.current[key].setLngLat([point[1], point[0]]);
       } else if (markers.current[key]) {
-        markers.current[key].setMap(null);
+        markers.current[key].remove();
         markers.current[key] = null;
       }
     });
     if (pickupPoint && destinationPoint) {
-      map.current.setCenter({ lat: pickupPoint[0], lng: pickupPoint[1] });
-      const bounds = new window.google.maps.LatLngBounds();
-      [pickupPoint, destinationPoint, driverPoint].filter(Boolean).forEach(([lat, lng]) => bounds.extend({ lat, lng }));
-      map.current.fitBounds(bounds, 48);
+      const bounds = new maplibregl.LngLatBounds();
+      [pickupPoint, destinationPoint, driverPoint].filter(Boolean).forEach(([lat, lng]) => bounds.extend([lng, lat]));
+      map.current.fitBounds(bounds, { padding: 64, maxZoom: 15, duration: 650 });
     } else if (pickupPoint || destinationPoint) {
       const point = pickupPoint ?? destinationPoint;
-      map.current.panTo({ lat: point[0], lng: point[1] });
-      map.current.setZoom(15);
+      map.current.flyTo({ center: [point[1], point[0]], zoom: 14, duration: 650 });
     }
-    route.current?.setMap(null);
-    route.current = null;
-    if (encodedPolyline) {
-      const path = window.google.maps.geometry.encoding.decodePath(encodedPolyline);
-      route.current = new window.google.maps.Polyline({
-        path, geodesic: true, strokeColor: '#b89a62', strokeOpacity: 0.95,
-        strokeWeight: 5, map: map.current,
-      });
-    }
-  }, [status, pickupPoint, destinationPoint, driverPoint, encodedPolyline]);
+    const source = map.current.getSource('movara-route');
+    if (source) source.setData({ type: 'FeatureCollection', features: encodedPolyline ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: decodePolyline(encodedPolyline).map(([lat, lng]) => [lng, lat]) } }] : [] });
+  }, [pickupPoint, destinationPoint, driverPoint, encodedPolyline]);
 
-  if (status !== 'ready') {
-    const message = status === 'missing'
-      ? 'Google Maps needs to be connected to show the live map.'
-      : status === 'error' ? 'Google Maps could not load. Check the Maps key and billing settings.' : 'Loading Google Maps…';
-    return <div className="google-map-unavailable"><Icon icon={Location01Icon} size={28} /><span>{message}</span></div>;
-  }
-  return <div className="google-map-canvas" ref={container} role="application" aria-label="Google map. Click to set pickup and destination." />;
+  return <div className="google-map-canvas" ref={container} role="application" aria-label="OpenStreetMap. Click to set pickup and destination." />;
 }
 
-function GooglePlaceField({ label, value, onChange, onSelect, status, placeholder }) {
+function colorForMarker(key) { return key === 'destination' ? '#b35c54' : key === 'driver' ? '#47825c' : '#172f4e'; }
+
+function GooglePlaceField({ label, value, onChange, onSelect, placeholder }) {
   const [suggestions, setSuggestions] = useState([]);
-  const sessionToken = useRef(null);
+  const [searchError, setSearchError] = useState('');
   const requestNumber = useRef(0);
 
   useEffect(() => {
     const currentRequest = ++requestNumber.current;
-    if (status !== 'ready' || value.trim().length < 3) { setSuggestions([]); return undefined; }
+    if (value.trim().length < 3) { setSuggestions([]); setSearchError(''); return undefined; }
     const timer = setTimeout(async () => {
       try {
-        const places = await window.google.maps.importLibrary('places');
-        sessionToken.current ??= new places.AutocompleteSessionToken();
-        const { suggestions: results = [] } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-          input: value, language: 'en', region: 'ng', sessionToken: sessionToken.current,
-        });
-        if (currentRequest === requestNumber.current) setSuggestions(results.filter((item) => item.placePrediction));
-      } catch (error) {
-        console.warn('Address suggestions unavailable', error);
-        if (currentRequest === requestNumber.current) setSuggestions([]);
+        const { data, error } = await supabase.functions.invoke('place-search', { body: { query: value.trim() } });
+        if (currentRequest === requestNumber.current) { setSuggestions(data?.places ?? []); setSearchError(error?.message || data?.error || ''); }
+      } catch {
+        if (currentRequest === requestNumber.current) { setSuggestions([]); setSearchError('Address search is unavailable. You can tap the map to choose a location.'); }
       }
-    }, 320);
+    }, 380);
     return () => clearTimeout(timer);
-  }, [value, status]);
+  }, [value]);
 
-  async function choosePlace(prediction) {
-    try {
-      const place = prediction.toPlace();
-      await place.fetchFields({ fields: ['location', 'formattedAddress', 'addressComponents'] });
-      if (!place.location) return;
-      const parts = place.addressComponents ?? [];
-      const city = parts.find((part) => part.types.some((type) => ['locality', 'postal_town', 'administrative_area_level_2'].includes(type)))?.shortText;
-      const country = parts.find((part) => part.types.includes('country'))?.shortText ?? 'NG';
-      const cityCode = city ? `${country}-${city.normalize('NFKD').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toUpperCase()}`.slice(0, 24) : `${country}-DEFAULT`;
-      onSelect(place.formattedAddress || prediction.text.toString(), [place.location.lat(), place.location.lng()], { cityCode, cityName: city || 'Nigeria' });
-      setSuggestions([]);
-      sessionToken.current = null;
-    } catch {
-      setSuggestions([]);
-    }
+  function choosePlace(place) {
+    onSelect(place.label, place.point, { cityCode: place.cityCode, cityName: place.cityName });
+    setSuggestions([]); setSearchError('');
   }
 
   return <div className="ride-place-field">
     <label className="field"><Icon icon={Location01Icon} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} autoComplete="off" required aria-label={label} /></label>
-    {suggestions.length > 0 && <div className="place-suggestions" role="listbox" aria-label={`${label} suggestions`}>{suggestions.slice(0, 5).map((item, index) => <button type="button" role="option" key={`${item.placePrediction?.placeId ?? label}-${index}`} onClick={() => choosePlace(item.placePrediction)}>{item.placePrediction.text.toString()}</button>)}</div>}
+    {suggestions.length > 0 && <div className="place-suggestions" role="listbox" aria-label={`${label} suggestions`}>{suggestions.slice(0, 5).map((item, index) => <button type="button" role="option" key={`${item.label}-${index}`} onClick={() => choosePlace(item)}>{item.label}</button>)}</div>}
+    {searchError && <small className="field-help">{searchError}</small>}
   </div>;
 }
 
@@ -509,7 +472,6 @@ function RidePage({ user, showToast, navigate }) {
   const [feedback, setFeedback] = useState({});
   const [sharedLinks, setSharedLinks] = useState({});
   const [reporting, setReporting] = useState('');
-  const mapsStatus = useGoogleMaps();
 
   const selectedRide = rideOptions.find((option) => option.key === vehicle) ?? rideOptions[0];
   const estimatedFare = liveRoute?.estimatedFareNgnKobo ? liveRoute.estimatedFareNgnKobo / 100 : null;
@@ -735,9 +697,9 @@ function RidePage({ user, showToast, navigate }) {
     <div className="ride-layout">
       <form className="panel ride-form" onSubmit={requestRide}>
         <div className="form-heading"><span className="form-step">01</span><div><h2>Your route</h2><p>Where should we pick you up?</p></div></div>
-        <GooglePlaceField label="Pickup location" value={pickup} status={mapsStatus} placeholder="Pickup location" onChange={(value) => { setPickup(value); setPickupPoint(null); setCity({ cityCode: 'NG-DEFAULT', cityName: 'Nigeria' }); }} onSelect={(label, point, market) => { setPickup(label); setPickupPoint(point); setCity(market); }} />
+        <GooglePlaceField label="Pickup location" value={pickup} placeholder="Pickup location" onChange={(value) => { setPickup(value); setPickupPoint(null); setCity({ cityCode: 'NG-DEFAULT', cityName: 'Nigeria' }); }} onSelect={(label, point, market) => { setPickup(label); setPickupPoint(point); setCity(market); }} />
         <button className="text-action location-action" type="button" onClick={useMyLocation} disabled={locating}>{locating ? 'Finding your location…' : '◎ Use my current location'}</button>
-        <GooglePlaceField label="Destination" value={destination} status={mapsStatus} placeholder="Where to?" onChange={(value) => { setDestination(value); setDestinationPoint(null); }} onSelect={(label, point) => { setDestination(label); setDestinationPoint(point); }} />
+        <GooglePlaceField label="Destination" value={destination} placeholder="Where to?" onChange={(value) => { setDestination(value); setDestinationPoint(null); }} onSelect={(label, point) => { setDestination(label); setDestinationPoint(point); }} />
         <p className="map-help">Choose a suggested address or tap the map to set both points.</p>
         <div className="form-heading second"><span className="form-step">02</span><div><h2>Choose a ride</h2><p>Fare combines booking, road distance, and trip time.</p></div></div>
         <div className="vehicle-list">{rideOptions.map((option) => <button type="button" key={option.key} onClick={() => { setVehicle(option.key); if (passengers > option.capacity) setPassengers(option.capacity); }} className={vehicle === option.key ? 'vehicle selected' : 'vehicle'} aria-pressed={vehicle === option.key}><span className="vehicle-icon"><Icon icon={Car01Icon} /></span><span className="vehicle-info"><b>{option.name}</b><small>{option.description} · up to {option.capacity}</small></span><b className="vehicle-price">{liveRoute?.serviceLevel===option.key ? formatMoneyKobo(liveRoute.components?.bookingFeeNgnKobo, liveRoute.currency) : 'Live fare'}</b><span className="radio" /></button>)}</div>
@@ -753,7 +715,7 @@ function RidePage({ user, showToast, navigate }) {
         <div className="fine-print"><Icon icon={Shield01Icon} size={16} /> Your request and trip updates are saved to your account.</div>
       </form>
       <aside className="ride-aside">
-        <div className="map-live"><GoogleMapCanvas status={mapsStatus} pickupPoint={pickupPoint} destinationPoint={destinationPoint} encodedPolyline={liveRoute?.encodedPolyline} onPick={setMapPoint} /><span className="map-caption">{pickupPoint ? destinationPoint ? 'LIVE ROAD ROUTE' : 'TAP TO SET DESTINATION' : 'TAP TO SET PICKUP, THEN DESTINATION'}</span></div>
+        <div className="map-live"><GoogleMapCanvas pickupPoint={pickupPoint} destinationPoint={destinationPoint} encodedPolyline={liveRoute?.encodedPolyline} onPick={setMapPoint} /><span className="map-caption">{pickupPoint ? destinationPoint ? 'LIVE ROAD ROUTE' : 'TAP TO SET DESTINATION' : 'TAP TO SET PICKUP, THEN DESTINATION'}</span></div>
         <div className="fare-card">
           <span className="fare-icon"><Icon icon={Wallet01Icon} /></span>
           <div><small>{routeLoading ? 'Calculating live route…' : liveRoute ? `${liveRoute.distanceText} road distance · ${liveRoute.durationText}` : 'Estimated fare'}</small><b>{estimatedFare == null ? 'Choose route' : formatMoneyKobo(liveRoute.estimatedFareNgnKobo, liveRoute.currency)}</b></div>
@@ -777,7 +739,7 @@ function RidePage({ user, showToast, navigate }) {
           {ride.cancellation_reason === 'rider_no_show' && <div className="ride-live-note">The driver reported a rider no-show after waiting at pickup. No no-show cancellation fee was added. If you prepaid online, contact support to review the payment.</div>}
           {ride.payment_method === 'paystack' && <div className="ride-live-note">Ride payment: {paymentStatus === 'succeeded' ? 'Confirmed' : paymentStatus === 'pending' ? 'Checkout started' : 'Awaiting payment'}{ride.status === 'accepted' && paymentStatus !== 'succeeded' && <button className="text-action" type="button" onClick={() => payForRide(ride.id,'ride')} disabled={payingRide === `${ride.id}:ride`}>{payingRide === `${ride.id}:ride` ? 'Opening checkout…' : 'Pay securely'}</button>}</div>}
           {ride.cancellation_fee_ngn_kobo > 0 && <div className="ride-live-note">Cancellation fee: {formatMoneyKobo(ride.cancellation_fee_ngn_kobo,ride.currency)}{ride.payment_method === 'paystack' && cancellationStatus !== 'succeeded' && <button className="text-action" type="button" onClick={() => payForRide(ride.id,'cancellation_fee')} disabled={payingRide === `${ride.id}:cancellation_fee`}>{payingRide === `${ride.id}:cancellation_fee` ? 'Opening checkout…' : 'Pay cancellation fee'}</button>}{ride.payment_method === 'cash' && <small>Settle with the driver directly.</small>}</div>}
-          {['accepted','in_progress'].includes(ride.status) && <div className="ride-live-note">{location ? `Driver location updated ${new Date(location.updated_at).toLocaleTimeString()}` : 'Waiting for your driver to share their location.'}{location && <div className="ride-live-map"><GoogleMapCanvas status={mapsStatus} pickupPoint={[ride.pickup_latitude, ride.pickup_longitude]} destinationPoint={[ride.destination_latitude, ride.destination_longitude]} driverPoint={mapPoint} encodedPolyline={null} onPick={() => {}} /></div>}</div>}
+          {['accepted','in_progress'].includes(ride.status) && <div className="ride-live-note">{location ? `Driver location updated ${new Date(location.updated_at).toLocaleTimeString()}` : 'Waiting for your driver to share their location.'}{location && <div className="ride-live-map"><GoogleMapCanvas pickupPoint={[ride.pickup_latitude, ride.pickup_longitude]} destinationPoint={[ride.destination_latitude, ride.destination_longitude]} driverPoint={mapPoint} encodedPolyline={null} onPick={() => {}} /></div>}</div>}
           {['accepted','in_progress'].includes(ride.status) && <div className="ride-action-row"><button type="button" className="button ghost" onClick={() => shareRide(ride)}>Share trip</button><button type="button" className="button danger" disabled={reporting === ride.id} onClick={() => reportSafety(ride,'sos')}>{reporting === ride.id ? 'Sending alert…' : 'SOS / urgent help'}</button><button type="button" className="text-action" disabled={reporting === ride.id} onClick={() => reportSafety(ride,'incident')}>Report a safety concern</button></div>}
           {ride.status === 'completed' && !feedback[ride.id] && <RideRating onSubmit={(rating, comment) => rateRide(ride.id, rating, comment)} />}
           {ride.status === 'completed' && feedback[ride.id] && <div className="ride-live-note">Feedback received. Thank you.</div>}
@@ -1212,11 +1174,11 @@ function AdminSupportPage({ user, showToast, navigate }) {
 }
 
 function SharedRidePage({ token, showToast, navigate }) {
-  const [data,setData]=useState(null);const [error,setError]=useState('');const mapsStatus=useGoogleMaps();
+  const [data,setData]=useState(null);const [error,setError]=useState('');
   useEffect(()=>{let alive=true;async function load(){if(!token){setError('Trip link is missing.');return;}const {data:result,error:invokeError}=await supabase.functions.invoke('shared-ride',{body:{token}});if(!alive)return;if(invokeError||result?.error){setError(result?.error||'Trip could not be loaded.');return;}setData(result);setError('');}load();const timer=setInterval(load,15000);return()=>{alive=false;clearInterval(timer);};},[token]);
   if(error)return <motion.div className="page subpage" {...pageMotion}><div className="panel safety-panel"><span className="eyebrow">MOVARA TRIP SHARE</span><h1>Trip link unavailable</h1><p>{error}</p><button className="button primary" onClick={()=>navigate('home')}>Go to MoVara</button></div></motion.div>;
   if(!data)return <div className="page subpage"><p className="history-message">Loading shared trip…</p></div>;
-  const ride=data.ride;return <motion.div className="page subpage shared-trip" {...pageMotion}><div className="subpage-intro"><span className="eyebrow">MOVARA TRIP SHARE</span><h1>Trip status: {ride.status.replaceAll('_',' ')}</h1><p>Shared with you for safety. This link expires {new Date(data.expiresAt).toLocaleString()}.</p></div><article className="panel safety-panel"><span className={`ride-status status-${ride.status}`}>{ride.service_level??'Ride'} · {ride.status.replaceAll('_',' ')}</span><p className="share-route"><span>{ride.pickup_label}</span><i /><span>{ride.destination_label}</span></p><small>Last update {new Date(data.location?.updated_at??ride.updated_at).toLocaleTimeString()}</small>{data.location&&<div className="ride-live-map"><GoogleMapCanvas status={mapsStatus} pickupPoint={null} destinationPoint={null} driverPoint={[data.location.latitude,data.location.longitude]} encodedPolyline={null} onPick={()=>{}} /></div>}<p className="share-privacy">This view shows ride progress and driver position only. It does not include contact or account details.</p></article></motion.div>;
+  const ride=data.ride;return <motion.div className="page subpage shared-trip" {...pageMotion}><div className="subpage-intro"><span className="eyebrow">MOVARA TRIP SHARE</span><h1>Trip status: {ride.status.replaceAll('_',' ')}</h1><p>Shared with you for safety. This link expires {new Date(data.expiresAt).toLocaleString()}.</p></div><article className="panel safety-panel"><span className={`ride-status status-${ride.status}`}>{ride.service_level??'Ride'} · {ride.status.replaceAll('_',' ')}</span><p className="share-route"><span>{ride.pickup_label}</span><i /><span>{ride.destination_label}</span></p><small>Last update {new Date(data.location?.updated_at??ride.updated_at).toLocaleTimeString()}</small>{data.location&&<div className="ride-live-map"><GoogleMapCanvas pickupPoint={null} destinationPoint={null} driverPoint={[data.location.latitude,data.location.longitude]} encodedPolyline={null} onPick={()=>{}} /></div>}<p className="share-privacy">This view shows ride progress and driver position only. It does not include contact or account details.</p></article></motion.div>;
 }
 
 function AdminPricingPage({ user, showToast, navigate }) {

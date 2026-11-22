@@ -22,7 +22,7 @@ Open the local address shown by Vite, usually `http://127.0.0.1:5173`. Run `npm 
 npm run mobile
 ```
 
-Scan the Expo QR code with Expo Go, or press `a` to open an Android emulator. iOS simulator launch requires macOS. Android production maps require a Google Maps Android API key in the native build.
+Scan the Expo QR code with Expo Go, or press `a` to open an Android emulator. iOS simulator launch requires macOS. The web app uses OpenFreeMap with OpenStreetMap data. Live route quotes are calculated server-side through OpenRouteService when `ORS_API_KEY` is configured in Supabase; Google Routes remains an optional server-side fallback. Map and route attribution is shown with the map.
 
 ## Supabase configuration
 

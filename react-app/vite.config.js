@@ -11,6 +11,7 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
+          if (id.includes('maplibre-gl')) return 'maps';
           if (id.includes('leaflet') || id.includes('react-leaflet')) return 'maps';
           if (id.includes('@supabase')) return 'supabase';
           if (id.includes('framer-motion') || id.includes('/motion-dom/') || id.includes('/motion-utils/')) return 'motion';
