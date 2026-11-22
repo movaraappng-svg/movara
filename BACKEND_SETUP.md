@@ -1,35 +1,58 @@
-# Supabase and production setup
+# MoVara service and release setup
 
-The React web app and Expo mobile app connect to the existing Supabase project. Their ignored local environment files contain the client URL and publishable key:
+MoVara is a React web app and an Expo app for Android and iOS. Both clients use the production Supabase project through their local, ignored `.env` files. Only the Supabase project URL and publishable key belong in client apps. Keep service role keys, database credentials, payment secrets, and OAuth client secrets in Supabase secrets.
 
-- `react-app/.env`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`
-- `mobile/.env`: `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+## Current production services
 
-These are public client values. Never expose a service-role key, database password or OAuth client secret in either app.
+- The production Supabase database has migrations applied through `20261122000300`. Recent migrations repair authenticated workflow access and the support administration RPCs.
+- Ride requests, signed fare quotes, configurable fare rules, airport and zone adjustments, promotions, corporate adjustments, driver approvals, and ride status workflows are implemented in Supabase.
+- Road routes and address suggestions use OpenRouteService. Route API credentials stay in Supabase. Fare rules are stored in the database and can be managed from the web operations page.
+- Cargo requests support operational quotes, Paystack checkout, assignment, and courier status updates. Quotes and assignments require an authorized operator.
+- Home search, saved properties, landlord verification, listing review, property enquiries, and viewing conversations use the database and private storage policies.
+- Paystack checkout, payment verification, refunds, wallet top ups, and withdrawal workflows are deployed. Confirm that `PAYSTACK_SECRET_KEY` is a live key before accepting real customer payments. Test keys only authorize test transactions.
+- FCM credentials and the Expo project are configured for native push delivery. A customer still needs to install a current build and grant notification permission.
+- Support, emergency contacts, safety reports, and operations review are available to signed-in customers and authorized staff.
 
-## Local use
+Third-party channels are conditional on provider credentials. Email requires `RESEND_API_KEY` and `RESEND_FROM_EMAIL`. SMS requires Termii credentials or Twilio credentials. The app records delivery outcomes and should show a channel as unavailable until its provider is configured. Google sign-in requires the Google provider to be enabled in Supabase Auth with valid OAuth client credentials and redirect URLs.
 
-Start the web app from the project root with `npm run dev`. Start Expo with `npm run mobile`. Do not commit `.env` files. Copy the respective `.env.example` file if setting up another machine.
+MoVara does not dispatch emergency responders. The safety page directs customers to Nigeria's emergency number, 112.
 
-## Auth provider setup
+## Local development
 
-Email/password authentication uses Supabase Auth. Email confirmation and password recovery depend on the Supabase email and redirect configuration. Add each local and production app origin to Supabase Auth URL Configuration.
+From the project root:
 
-To enable Google sign-in and sign-up:
+```powershell
+npm run dev
+npm run build
+npm run mobile
+```
 
-1. Create a Web application OAuth client in Google Cloud Console.
-2. Set the Google authorized redirect URI to `https://pxplmwfmkgpbyflmtibg.supabase.co/auth/v1/callback`.
-3. Enable Google under Supabase Dashboard → Authentication → Providers and enter the OAuth client ID and secret there. Keep the secret in Supabase only.
-4. Add the web preview and production origins to Supabase Auth's allowed redirect URLs. Native OAuth also needs platform callback configuration.
+The mobile project is in `mobile/`; the React web project is in `react-app/`. Do not commit either `.env` file. Copy the matching `.env.example` file when setting up another workstation.
 
-Supabase Auth creates a user on first successful Google consent and signs in returning users. Choosing a role in the interface does not grant driver or landlord access. Those roles remain approval-gated.
+## Google sign-in
 
-## Current service boundary
+1. Create a Web OAuth client in Google Cloud Console.
+2. Add `https://pxplmwfmkgpbyflmtibg.supabase.co/auth/v1/callback` as an authorized redirect URI in Google Cloud.
+3. Enable Google in Supabase Dashboard under Authentication, Providers, then enter the OAuth client ID and secret there.
+4. Add the deployed web origin and local web origins to Supabase Auth's redirect URL allowlist. For the native app, keep `movara://auth/callback` allowlisted and ensure the Google provider redirects back through Supabase.
+5. Test new-user signup, existing-user signin, email confirmation, cancellation, and signout on both web and Android.
 
-The clients read published property listings, save supported profile and favourite information, and create signed-in customer ride requests. Fare values are estimates. There is no live driver matching, trip dispatch, driver tracking, payment provider, road routing, address search or production domain deployment yet. These services require trusted backend workflows and provider configuration.
+Google first sign-in creates an Auth user. Driver and landlord permissions remain approval-gated and cannot be granted by selecting a role in the client.
 
-Database grants, row-level security and Storage policies are the authorization boundary. Review the policies and migrations before deployment. Do not advertise unavailable flows as live services.
+## Web release
 
-## Validation and launch
+The GitHub Pages workflow builds the web app when changes to `react-app/` are pushed to `main`. Configure repository Actions variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`, then check the Actions run and Pages environment after each release. The production base path is `/movara/`.
 
-Run `npm run build` for the browser release bundle. Validate authentication redirects, row-level security, private Storage access, location permissions and app links in a staging environment. Configure monitoring, backups, email delivery, production domains and platform map credentials before launch.
+## Android release
+
+Build an installable preview APK from `mobile/` with:
+
+```powershell
+npx eas-cli build --platform android --profile preview
+```
+
+For a Play Store release, build the `production` profile, review the signing credentials and store listing, then submit through the Play Console. Use a preview APK for device installation, not as a public Play Store release.
+
+## Operational checks
+
+Before taking real bookings, verify the Google Auth provider, live Paystack mode and webhook URL, email and SMS provider configuration, push delivery on a physical device, driver onboarding and approvals, live routing coverage, city fare rules, data backups, and support ownership. Never describe a test-mode payment as a completed live payment.

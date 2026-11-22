@@ -130,7 +130,7 @@ export function App() {
   return <div className="app-shell">
     <header className="topbar">
       <button className="brand" onClick={() => navigate('home')} aria-label="MoVara home">
-        <img src="/movara_logo.png" alt="MoVara" onError={(event) => { event.currentTarget.style.display = 'none'; }} />
+        <img src={`${import.meta.env.BASE_URL}movara_logo.png`} alt="MoVara" onError={(event) => { event.currentTarget.style.display = 'none'; }} />
         <span className="brand-fallback">MoVara<span>.</span></span>
       </button>
       <nav className={mobileMenu ? 'nav open' : 'nav'}>
