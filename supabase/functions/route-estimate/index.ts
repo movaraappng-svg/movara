@@ -80,7 +80,10 @@ Deno.serve(async (request) => {
     const now = Date.now();
     const current = adjustments.filter((adjustment) => (!adjustment.starts_at || new Date(adjustment.starts_at).getTime() <= now)
       && (!adjustment.ends_at || new Date(adjustment.ends_at).getTime() > now));
-    const airportAdjustment = Boolean(body.airportPickup) ? current.filter((item) => item.adjustment_type === 'airport') : [];
+    const cityAirportAdjustments = current.filter((item) => item.city_code === cityCode && item.adjustment_type === 'airport');
+    const airportAdjustment = Boolean(body.airportPickup)
+      ? (cityAirportAdjustments.length ? cityAirportAdjustments : current.filter((item) => item.city_code === 'NG-DEFAULT' && item.adjustment_type === 'airport'))
+      : [];
     const zoneAdjustments = current.filter((item) => item.adjustment_type === 'zone' && insideBoundary(body.origin as any, item.boundary));
     const events = current.filter((item) => item.adjustment_type === 'event');
     const promo = typeof body.promoCode === 'string' ? current.find((item) => item.adjustment_type === 'promo' && item.code?.toLowerCase() === body.promoCode.toLowerCase()) : null;
