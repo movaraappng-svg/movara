@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { AppText as Text } from '../src/AppText';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import { Car01Icon, Home01Icon, ArrowRight01Icon, Shield01Icon, DeliveryBox01Icon } from '@hugeicons/core-free-icons';
@@ -9,7 +9,7 @@ const cream = '#F7F5F0';
 
 export default function HomeScreen() {
   return <ScrollView contentContainerStyle={styles.page}>
-    <View style={styles.header}><View style={styles.brand}><Image source={require('../assets/branding/movara-icon.png')} style={styles.brandIcon} resizeMode="contain" accessibilityLabel="MoVara"/><View><Text style={styles.logo}>MoVara</Text><Text style={styles.tag}>Your City. Your Home. Your Journey.</Text></View></View><Pressable onPress={() => router.push('/account')} style={styles.profileButton}><Text style={styles.profileText}>My account</Text></Pressable></View>
+    <View style={styles.header}><View><Text style={styles.logo}>MoVara</Text><Text style={styles.tag}>Your City. Your Home. Your Journey.</Text></View><Pressable onPress={() => router.push('/account')} style={styles.profileButton}><Text style={styles.profileText}>My account</Text></Pressable></View>
     <View style={styles.hero}><Text style={styles.eyebrow}>LIFE, IN MOTION</Text><Text style={styles.title}>Good days begin{ '\n' }with getting there.</Text><Text style={styles.copy}>Book a ride, find a place to call home, and make your next move with confidence.</Text></View>
     <Text style={styles.sectionTitle}>What brings you here?</Text>
     <View style={styles.cards}>
@@ -28,7 +28,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   page: { flexGrow: 1, backgroundColor: cream, paddingTop: 64, paddingHorizontal: 24, paddingBottom: 48 },
-  header: { marginBottom: 40, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, brand: { flexDirection: 'row', alignItems: 'center', gap: 9, flexShrink: 1 }, brandIcon: { width: 46, height: 46, borderRadius: 11, backgroundColor: '#081C3A' }, logo: { color: navy, fontSize: 26, fontWeight: '800', letterSpacing: -.8 }, tag: { color: '#8B7957', fontSize: 8, fontWeight: '600', letterSpacing: 0, marginTop: 2 }, profileButton: { borderWidth: 1, borderColor: '#DAD4C9', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 }, profileText: { color: navy, fontWeight: '600', fontSize: 12 },
+  header: { marginBottom: 40, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, logo: { color: navy, fontSize: 26, fontWeight: '800', letterSpacing: -.8 }, tag: { color: '#8B7957', fontSize: 8, fontWeight: '600', letterSpacing: 0, marginTop: 2 }, profileButton: { borderWidth: 1, borderColor: '#DAD4C9', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 }, profileText: { color: navy, fontWeight: '600', fontSize: 12 },
   hero: { backgroundColor: navy, borderRadius: 30, padding: 28, paddingVertical: 34, marginBottom: 40 }, eyebrow: { color: '#D6BD8B', fontSize: 11, fontWeight: '700', letterSpacing: 2 }, title: { color: 'white', fontSize: 37, fontWeight: '700', letterSpacing: -1.3, lineHeight: 43, marginTop: 18 }, copy: { color: '#DFE5EC', fontSize: 15, lineHeight: 24, marginTop: 16 },
   sectionTitle: { color: navy, fontSize: 21, fontWeight: '700', marginBottom: 16 }, cards: { gap: 12 }, card: { backgroundColor: 'white', borderRadius: 21, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, borderColor: '#E9E5DE' }, pressed: { transform: [{ scale: .98 }], opacity: .9 }, icon: { width: 52, height: 52, borderRadius: 17, backgroundColor: '#F2EEE5', alignItems: 'center', justifyContent: 'center' }, cardText: { flex: 1 }, cardTitle: { color: navy, fontSize: 17, fontWeight: '700' }, cardCopy: { color: '#737C87', marginTop: 4, fontSize: 13 },
   notice: { backgroundColor: '#EEE8DB', padding: 14, borderRadius: 14, marginTop: 18 }, noticeText: { color: navy, fontSize: 13 }, bottom: { marginTop: 48, paddingTop: 24, borderTopWidth: 1, borderColor: '#E2DED6' }, bottomTitle: { color: navy, fontSize: 20, fontWeight: '700' }, bottomCopy: { color: '#737C87', marginTop: 6 },

@@ -130,7 +130,6 @@ export function App() {
   return <div className="app-shell">
     <header className="topbar">
       <button className="brand" onClick={() => navigate('home')} aria-label="MoVara home">
-        <img src={`${import.meta.env.BASE_URL}movara-icon.png`} alt="" aria-hidden="true" />
         <span className="brand-lockup"><b>MoVara</b><small>Your City. Your Home. Your Journey.</small></span>
       </button>
       <nav className={mobileMenu ? 'nav open' : 'nav'}>
@@ -861,7 +860,7 @@ function AuthPage({ showToast, navigate, user }) {
     } catch (error) { setBusy(false); showToast(error?.message || 'Google sign-in could not start. Please try again.'); }
   }
   return <motion.div className="page subpage auth-page" {...pageMotion}><form className="panel auth-panel" onSubmit={submit}>
-    <img className="auth-brand-logo" src={`${import.meta.env.BASE_URL}movara-logo.png`} alt="MoVara. Your City. Your Home. Your Journey." /><span className="eyebrow">WELCOME TO MoVara</span>
+    <span className="eyebrow">WELCOME TO MoVara</span>
     <h1>{mode === 'signin' ? 'Good to see you.' : 'Let’s get you started.'}</h1>
     <p>{mode === 'signin' ? 'Sign in to pick up where you left off with rides, homes, and your account.' : 'Create an account to save your rides, home search, and profile details.'}</p>
     <div className="auth-tabs" role="group" aria-label="Choose sign in or account creation">

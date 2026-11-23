@@ -45,5 +45,5 @@ input,select,textarea{line-height:1.45}
 .google-mark{width:20px;height:20px;flex:0 0 20px}.auth-help{color:var(--muted);font-weight:400;font-size:12px;line-height:1.5}
 
 /* MoVara brand lockups and imagery */
-.brand img{width:44px;height:44px;object-fit:contain;background:#081c3a;border-radius:11px}.brand-lockup{display:grid;gap:1px;color:#fff}.brand-lockup b{font-size:21px;font-weight:700;letter-spacing:-.6px;line-height:1.1}.brand-lockup small{font-size:8px;line-height:1.2;color:#d2d9e1;white-space:nowrap}.auth-brand-logo{display:block;width:126px;height:126px;object-fit:contain;border-radius:20px;background:#081c3a;margin:0 auto 15px}
+.brand-lockup{display:grid;gap:1px;color:#fff}.brand-lockup b{font-size:21px;font-weight:700;letter-spacing:-.6px;line-height:1.1}.brand-lockup small{font-size:8px;line-height:1.2;color:#d2d9e1;white-space:nowrap}
 @media(max-width:700px){.brand-lockup small{font-size:7px}.footer span:nth-child(2){display:block;width:100%;order:3}.footer{justify-content:center;text-align:center}}
