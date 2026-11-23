@@ -123,7 +123,7 @@ export default function DriverScreen() {
   async function saveCargoAction(order,status,note){setBusy(true);const {error}=await supabase.rpc('driver_update_cargo_status',{p_order_id:order.id,p_new_status:status,p_note:note});setBusy(false);if(error)Alert.alert('Delivery update failed',error.message);else await load();}
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={navy}/></View>;
-  if (!user) return <ScrollView contentContainerStyle={styles.page}><Pressable onPress={() => router.back()}><Text style={styles.back}>‹  Back</Text></Pressable><View style={styles.panel}><Text style={styles.kicker}>DRIVE WITH MOVARA</Text><Text style={styles.title}>Work around your day.</Text><Text style={styles.copy}>Sign in to apply, submit your vehicle, and manage trips from one place.</Text><Pressable style={styles.button} onPress={() => router.push('/auth')}><Text style={styles.buttonText}>Sign in or create account</Text></Pressable></View></ScrollView>;
+  if (!user) return <ScrollView contentContainerStyle={styles.page}><Pressable onPress={() => router.back()}><Text style={styles.back}>‹  Back</Text></Pressable><View style={styles.panel}><Text style={styles.kicker}>DRIVE WITH MoVara</Text><Text style={styles.title}>Work around your day.</Text><Text style={styles.copy}>Sign in to apply, submit your vehicle, and manage trips from one place.</Text><Pressable style={styles.button} onPress={() => router.push('/auth')}><Text style={styles.buttonText}>Sign in or create account</Text></Pressable></View></ScrollView>;
 
   const activeVehicles = vehicles.filter((item) => item.verification === 'approved');
   const assigned = rides.filter((ride) => ride.driver_id === user.id);

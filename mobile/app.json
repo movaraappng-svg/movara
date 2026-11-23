@@ -2,14 +2,21 @@
   "expo": {
     "name": "MoVara",
     "slug": "movara",
+    "icon": "./assets/branding/movara-icon.png",
     "scheme": "movara",
     "version": "1.0.1",
     "android": {
       "package": "com.movaraappng.movara",
+      "icon": "./assets/branding/movara-icon.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/branding/movara-icon.png",
+        "backgroundColor": "#081C3A"
+      },
       "googleServicesFile": "./google-services.json"
     },
     "ios": {
-      "bundleIdentifier": "com.movaraappng.movara"
+      "bundleIdentifier": "com.movaraappng.movara",
+      "icon": "./assets/branding/movara-icon.png"
     },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -28,6 +35,15 @@
         "expo-notifications",
         {
           "defaultChannel": "updates"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/branding/movara-logo.png",
+          "imageWidth": 280,
+          "resizeMode": "contain",
+          "backgroundColor": "#081C3A"
         }
       ],
       "expo-status-bar",
